@@ -128,16 +128,35 @@ export interface VillageConfig {
 export interface UserProfile {
   uid: string;
   displayName: string;
-  email: string;
-  phone?: string;
+  email?: string;
+  phone: string;
+  address?: string;
+  photoUrl?: string;
   role: 'resident' | 'provider';
   villageId: string;
   neighborhood?: string;
   providerStatus: 'none' | 'pending' | 'approved' | 'rejected';
-  serviceCategory?: 'none' | 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'farm' | 'ride';
+  serviceCategory?: 'none' | 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride';
   serviceTitle?: string;
   serviceFeeEgp?: string;
   serviceBio?: string;
+  isBanned?: boolean;
+  banUntilMs?: number;
+  banReason?: string;
+}
+
+export interface BannedPhoneRecord {
+  phone: string;
+  userId?: string;
+  userName?: string;
+  reason?: string;
+  banUntilMs: number;
+  isPermanent: boolean;
+}
+
+export interface PlatformPricingConfig {
+  adPriceWeekEgp: number;
+  adPriceMonthEgp: number;
 }
 
 export interface ProviderListing {
@@ -146,7 +165,7 @@ export interface ProviderListing {
   villageId: string;
   nameAr: string;
   nameEn: string;
-  category: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'farm' | 'ride';
+  category: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride';
   specialtyAr: string;
   specialtyEn: string;
   phone: string;
@@ -169,6 +188,10 @@ export interface VillageAd {
   category: 'offer' | 'shop' | 'property' | 'job' | 'event';
   priceText?: string;
   contactPhone: string;
+  durationPlan?: 'week' | 'month';
+  durationDays?: number;
+  costEgp?: number;
+  expiresAtMs?: number;
   status: 'pending' | 'approved' | 'rejected';
   createdDate?: string;
 }
@@ -314,10 +337,22 @@ export interface VillageRide {
   phone: string;
 }
 
+export interface OtherService {
+  id: string;
+  villageId: string;
+  name: { ar: string; en: string };
+  activityType: { ar: string; en: string };
+  description: { ar: string; en: string };
+  address: { ar: string; en: string };
+  priceLabel: { ar: string; en: string };
+  hours: { ar: string; en: string };
+  phone: string;
+}
+
 export interface BookingRequest {
   id: string;
   villageId?: string;
-  serviceType: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'farm' | 'ride';
+  serviceType: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride';
   title: string;
   providerName: string;
   customerName: string;
@@ -342,6 +377,54 @@ export function calculateDeliveryFeeEgp(
 ): number {
   if (isPickup) return 0;
   return Math.max(0, Math.round(baseFeeEgp + distanceKm * perKmFeeEgp));
+}
+
+export function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('20') && digits.length === 12) {
+    return digits.slice(1); // Convert 2010xxxxxxxx -> 010xxxxxxxx
+  }
+  if (digits.startsWith('0020') && digits.length === 14) {
+    return digits.slice(3);
+  }
+  return digits;
+}
+
+export function toE164Phone(raw: string): string {
+  const trimmed = raw.trim();
+  const digits = trimmed.replace(/\D/g, '');
+  if (!digits) return '';
+  if (trimmed.startsWith('+')) {
+    return `+${digits}`;
+  }
+  if (digits.startsWith('00')) {
+    return `+${digits.slice(2)}`;
+  }
+  if (digits.startsWith('20') && digits.length === 12) {
+    return `+${digits}`;
+  }
+  if (digits.startsWith('0') && digits.length === 11) {
+    return `+2${digits}`;
+  }
+  return `+${digits}`;
+}
+
+export function isBanCurrentlyActive(
+  isBanned?: boolean,
+  banUntilMs?: number,
+  isPermanent?: boolean,
+  nowMs = Date.now()
+): boolean {
+  if (isPermanent) return true;
+  if (banUntilMs && banUntilMs > 0) {
+    return nowMs < banUntilMs;
+  }
+  return Boolean(isBanned);
+}
+
+export function isAdExpired(expiresAtMs?: number, nowMs = Date.now()): boolean {
+  if (!expiresAtMs || expiresAtMs <= 0) return false;
+  return nowMs > expiresAtMs;
 }
 
 export const DEFAULT_DISTRICTS: VillageDistrict[] = [
@@ -1088,5 +1171,52 @@ export const VILLAGE_CHARITIES: CharityOrg[] = [
     address: { ar: 'ميدان المحطة - كفر سعد', en: 'Station Square - Kafr Saad' },
     phone: '01077889944',
     donationExample: { ar: 'كفالة شنطة مدرسية 180 ج.م', en: '180 EGP School Kit Sponsorship' }
+  }
+];
+
+export const VILLAGE_OTHER_SERVICES: OtherService[] = [
+  {
+    id: 'oth-1',
+    villageId: 'noqbas',
+    name: { ar: 'مكتبة ومركز تصوير الرسالة', en: 'Al-Resala Print & Stationery' },
+    activityType: { ar: 'طباعة، تصوير مستندات وأدوات مدرسية', en: 'Printing, Copying & School Supplies' },
+    description: { ar: 'تصوير أبيض وألوان، طباعة أبحاث، تغليف حراري، وتجهيز ملفات التقديم', en: 'B&W/color printing, binding, laminating, and official paperwork prep' },
+    address: { ar: 'أمام المدرسة الإعدادية - ىقباس', en: 'In front of Prep School - Noqbas' },
+    priceLabel: { ar: 'من 2 ج.م / ورقة', en: 'From 2 EGP / page' },
+    hours: { ar: 'يومياً: 8 ص - 9 م', en: 'Daily: 8 AM - 9 PM' },
+    phone: '01022113344'
+  },
+  {
+    id: 'oth-2',
+    villageId: 'noqbas',
+    name: { ar: 'سنتر صيانة الموبايلات والإلكترونيات', en: 'Mobile Repair & Accessories Hub' },
+    activityType: { ar: 'صيانة موبايلات، شواحن وأكسسوارات', en: 'Smartphone Repair & Accessories' },
+    description: { ar: 'تغيير شاشات وبطاريات أصلية، سوفت وير، وشحن رصيد وفواتير فوري', en: 'Screen/battery replacements, software service, and bill payments' },
+    address: { ar: 'الشارع العمومي - وسط البلد', en: 'Main Street - Village Center' },
+    priceLabel: { ar: 'كشف الأعطال مجاني', en: 'Free Diagnostics' },
+    hours: { ar: '10 ص - 11 م', en: '10 AM - 11 PM' },
+    phone: '01133224455'
+  },
+  {
+    id: 'oth-3',
+    villageId: 'noqbas',
+    name: { ar: 'مغسلة السجاد والبطاطين الحديثة', en: 'Modern Carpet & Blanket Laundry' },
+    activityType: { ar: 'غسيل وتجفيف سجاد وبطاطين بالمنزل', en: 'Carpet & Blanket Washing Service' },
+    description: { ar: 'استلام السجاد والبطاطين من البيت وتعطيرها وتسليمها خلال 48 ساعة', en: 'Home pickup and delivery within 48 hours with deep sanitization' },
+    address: { ar: 'مدخل القرية البحري', en: 'North Village Entrance' },
+    priceLabel: { ar: '35 ج.م / متر سجاد', en: '35 EGP / sq.meter' },
+    hours: { ar: '9 ص - 8 م', en: '9 AM - 8 PM' },
+    phone: '01244556677'
+  },
+  {
+    id: 'oth-4',
+    villageId: 'minya',
+    name: { ar: 'تأجير فراشة وكوش أفراح ومناسبات', en: 'Wedding & Event Tent Rentals' },
+    activityType: { ar: 'تجهيز أفراح، سرادقات ومناسبات', en: 'Event Staging & Sound Setup' },
+    description: { ar: 'كراسي، ترابيزات، إضاءة ليد وسماعات للمناسبات السعيدة والعزاء', en: 'Full seating, tents, lighting, and sound systems for village events' },
+    address: { ar: 'أول طريق منية سمنود', en: 'Minyat Samanoud Entrance' },
+    priceLabel: { ar: 'حسب التجهيز', en: 'Custom Quote' },
+    hours: { ar: '24 ساعة', en: '24/7 Service' },
+    phone: '01099887766'
   }
 ];

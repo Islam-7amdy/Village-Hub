@@ -22,25 +22,57 @@
     },
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Private user account profile and role status.",
+      "description": "Private user account profile linked to phone number, optional avatar, and moderation status.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
         "email": { "type": "string", "maxLength": 120 },
-        "phone": { "type": "string", "maxLength": 30 },
+        "phone": { "type": "string", "minLength": 8, "maxLength": 30 },
+        "address": { "type": "string", "maxLength": 200 },
+        "photoUrl": { "type": "string", "maxLength": 45000 },
         "role": { "type": "string", "enum": ["resident", "provider"] },
         "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "neighborhood": { "type": "string", "maxLength": 100 },
         "providerStatus": { "type": "string", "enum": ["none", "pending", "approved", "rejected"] },
-        "serviceCategory": { "type": "string", "enum": ["none", "doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "farm", "ride"] },
+        "serviceCategory": { "type": "string", "enum": ["none", "doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "other", "farm", "ride"] },
         "serviceTitle": { "type": "string", "maxLength": 100 },
         "serviceFeeEgp": { "type": "string", "maxLength": 60 },
         "serviceBio": { "type": "string", "maxLength": 400 },
+        "isBanned": { "type": "boolean" },
+        "banUntilMs": { "type": "number" },
+        "banReason": { "type": "string", "maxLength": 200 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "displayName", "email", "role", "villageId", "providerStatus", "createdAt", "updatedAt"]
+      "required": ["uid", "displayName", "phone", "role", "villageId", "providerStatus", "createdAt", "updatedAt"]
+    },
+    "BannedPhone": {
+      "title": "BannedPhone",
+      "description": "Phone-number-based timed or permanent ban record enforced by admin.",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string", "minLength": 8, "maxLength": 30, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 80 },
+        "reason": { "type": "string", "maxLength": 200 },
+        "banUntilMs": { "type": "number" },
+        "isPermanent": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["phone", "banUntilMs", "isPermanent", "createdAt"]
+    },
+    "UserCart": {
+      "title": "UserCart",
+      "description": "Per-user persistent shopping cart isolated by user UID.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "items": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "villageId", "items", "updatedAt"]
     },
     "ProviderListing": {
       "title": "ProviderListing",
@@ -51,7 +83,7 @@
         "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "nameAr": { "type": "string", "minLength": 1, "maxLength": 80 },
         "nameEn": { "type": "string", "minLength": 1, "maxLength": 80 },
-        "category": { "type": "string", "enum": ["doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "farm", "ride"] },
+        "category": { "type": "string", "enum": ["doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "other", "farm", "ride"] },
         "specialtyAr": { "type": "string", "minLength": 1, "maxLength": 120 },
         "specialtyEn": { "type": "string", "minLength": 1, "maxLength": 120 },
         "phone": { "type": "string", "minLength": 3, "maxLength": 30 },
@@ -69,7 +101,7 @@
     },
     "VillageAd": {
       "title": "VillageAd",
-      "description": "User-submitted classified ad or promotion requiring admin approval.",
+      "description": "User-submitted classified ad with paid duration tier, automatic expiration, and admin approval.",
       "type": "object",
       "properties": {
         "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -80,6 +112,10 @@
         "category": { "type": "string", "enum": ["offer", "shop", "property", "job", "event"] },
         "priceText": { "type": "string", "maxLength": 60 },
         "contactPhone": { "type": "string", "minLength": 3, "maxLength": 30 },
+        "durationPlan": { "type": "string", "enum": ["week", "month"] },
+        "durationDays": { "type": "number" },
+        "costEgp": { "type": "number" },
+        "expiresAtMs": { "type": "number" },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -93,7 +129,7 @@
       "properties": {
         "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "serviceType": { "type": "string", "enum": ["doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "farm", "ride"] },
+        "serviceType": { "type": "string", "enum": ["doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "other", "farm", "ride"] },
         "title": { "type": "string", "minLength": 1, "maxLength": 160 },
         "providerName": { "type": "string", "minLength": 1, "maxLength": 100 },
         "customerName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -130,10 +166,12 @@
     },
     "AppSettings": {
       "title": "AppSettings",
-      "description": "Global platform configuration such as active default village.",
+      "description": "Global platform configuration such as active default village and ad pricing.",
       "type": "object",
       "properties": {
         "activeVillageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "adPriceWeekEgp": { "type": "number" },
+        "adPriceMonthEgp": { "type": "number" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["activeVillageId", "updatedAt"]
@@ -147,6 +185,14 @@
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Private user accounts and service provider applications."
+    },
+    "/bannedPhones/{phone}": {
+      "schema": { "$ref": "#/entities/BannedPhone" },
+      "description": "Phone-number bans managed by admin."
+    },
+    "/carts/{userId}": {
+      "schema": { "$ref": "#/entities/UserCart" },
+      "description": "Isolated per-user shopping cart."
     },
     "/providers/{providerId}": {
       "schema": { "$ref": "#/entities/ProviderListing" },

@@ -25,8 +25,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isVerifiedEmail() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+    function isVerifiedUser() {
+      return isSignedIn() && (
+        request.auth.token.email_verified == true ||
+        (request.auth.token.phone_number != null && request.auth.token.phone_number.size() >= 8)
+      );
     }
 
     function isOwner(uid) {
@@ -38,6 +41,11 @@ service cloud.firestore {
         (request.auth.token.email == 'hamzaislam1518@gmail.com' && request.auth.token.email_verified == true) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
+    }
+
+    function isNotBannedUser() {
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid)) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isBanned', false) != true;
     }
 
     // Validation Helpers
@@ -63,25 +71,52 @@ service cloud.firestore {
     }
 
     function isValidUserProfile(data) {
-      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'villageId', 'providerStatus', 'createdAt', 'updatedAt']) &&
+      return data.keys().hasAll(['uid', 'displayName', 'phone', 'role', 'villageId', 'providerStatus', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
-          'uid', 'displayName', 'email', 'phone', 'role', 'villageId', 'neighborhood',
+          'uid', 'displayName', 'email', 'phone', 'address', 'photoUrl', 'role', 'villageId', 'neighborhood',
           'providerStatus', 'serviceCategory', 'serviceTitle', 'serviceFeeEgp', 'serviceBio',
-          'createdAt', 'updatedAt'
+          'isBanned', 'banUntilMs', 'banReason', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.uid) &&
         data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
-        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
-        (!('phone' in data) || (data.phone is string && data.phone.size() <= 30)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
+        data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 30 &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 200)) &&
+        (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 45000)) &&
         data.role in ['resident', 'provider'] &&
         isValidId(data.villageId) &&
         (!('neighborhood' in data) || (data.neighborhood is string && data.neighborhood.size() <= 100)) &&
         data.providerStatus in ['none', 'pending', 'approved', 'rejected'] &&
-        (!('serviceCategory' in data) || (data.serviceCategory in ['none', 'doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'farm', 'ride'])) &&
+        (!('serviceCategory' in data) || (data.serviceCategory in ['none', 'doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'other', 'farm', 'ride'])) &&
         (!('serviceTitle' in data) || (data.serviceTitle is string && data.serviceTitle.size() <= 100)) &&
         (!('serviceFeeEgp' in data) || (data.serviceFeeEgp is string && data.serviceFeeEgp.size() <= 60)) &&
         (!('serviceBio' in data) || (data.serviceBio is string && data.serviceBio.size() <= 400)) &&
+        (!('isBanned' in data) || (data.isBanned is bool)) &&
+        (!('banUntilMs' in data) || (data.banUntilMs is number)) &&
+        (!('banReason' in data) || (data.banReason is string && data.banReason.size() <= 200)) &&
         data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBannedPhone(data) {
+      return data.keys().hasAll(['phone', 'banUntilMs', 'isPermanent', 'createdAt']) &&
+        data.keys().hasOnly(['phone', 'userId', 'userName', 'reason', 'banUntilMs', 'isPermanent', 'createdAt']) &&
+        isValidId(data.phone) &&
+        data.phone.size() >= 8 && data.phone.size() <= 30 &&
+        (!('userId' in data) || (data.userId is string && data.userId.size() <= 128)) &&
+        (!('userName' in data) || (data.userName is string && data.userName.size() <= 80)) &&
+        (!('reason' in data) || (data.reason is string && data.reason.size() <= 200)) &&
+        data.banUntilMs is number &&
+        data.isPermanent is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidUserCart(data) {
+      return data.keys().hasAll(['ownerId', 'villageId', 'items', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'villageId', 'items', 'updatedAt']) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.villageId) &&
+        data.items is list && data.items.size() <= 50 &&
         data.updatedAt is timestamp;
     }
 
@@ -96,7 +131,7 @@ service cloud.firestore {
         isValidId(data.villageId) &&
         data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 80 &&
         data.nameEn is string && data.nameEn.size() >= 1 && data.nameEn.size() <= 80 &&
-        data.category in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'farm', 'ride'] &&
+        data.category in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'other', 'farm', 'ride'] &&
         data.specialtyAr is string && data.specialtyAr.size() >= 1 && data.specialtyAr.size() <= 120 &&
         data.specialtyEn is string && data.specialtyEn.size() >= 1 && data.specialtyEn.size() <= 120 &&
         data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
@@ -115,7 +150,8 @@ service cloud.firestore {
       return data.keys().hasAll(['ownerId', 'authorName', 'villageId', 'title', 'description', 'category', 'contactPhone', 'status', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly([
           'ownerId', 'authorName', 'villageId', 'title', 'description', 'category',
-          'priceText', 'contactPhone', 'status', 'createdAt', 'updatedAt'
+          'priceText', 'contactPhone', 'durationPlan', 'durationDays', 'costEgp', 'expiresAtMs',
+          'status', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.ownerId) &&
         data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
@@ -125,6 +161,10 @@ service cloud.firestore {
         data.category in ['offer', 'shop', 'property', 'job', 'event'] &&
         (!('priceText' in data) || (data.priceText is string && data.priceText.size() <= 60)) &&
         data.contactPhone is string && data.contactPhone.size() >= 3 && data.contactPhone.size() <= 30 &&
+        (!('durationPlan' in data) || (data.durationPlan in ['week', 'month'])) &&
+        (!('durationDays' in data) || (data.durationDays is number && data.durationDays >= 1 && data.durationDays <= 365)) &&
+        (!('costEgp' in data) || (data.costEgp is number && data.costEgp >= 0 && data.costEgp <= 50000)) &&
+        (!('expiresAtMs' in data) || (data.expiresAtMs is number)) &&
         data.status in ['pending', 'approved', 'rejected'] &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -139,7 +179,7 @@ service cloud.firestore {
         ]) &&
         isValidId(data.ownerId) &&
         isValidId(data.villageId) &&
-        data.serviceType in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'farm', 'ride'] &&
+        data.serviceType in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'other', 'farm', 'ride'] &&
         data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
         data.providerName is string && data.providerName.size() >= 1 && data.providerName.size() <= 100 &&
         data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 80 &&
@@ -175,8 +215,10 @@ service cloud.firestore {
 
     function isValidAppSettings(data) {
       return data.keys().hasAll(['activeVillageId', 'updatedAt']) &&
-        data.keys().hasOnly(['activeVillageId', 'updatedAt']) &&
+        data.keys().hasOnly(['activeVillageId', 'adPriceWeekEgp', 'adPriceMonthEgp', 'updatedAt']) &&
         isValidId(data.activeVillageId) &&
+        (!('adPriceWeekEgp' in data) || (data.adPriceWeekEgp is number && data.adPriceWeekEgp >= 0 && data.adPriceWeekEgp <= 10000)) &&
+        (!('adPriceMonthEgp' in data) || (data.adPriceMonthEgp is number && data.adPriceMonthEgp >= 0 && data.adPriceMonthEgp <= 50000)) &&
         data.updatedAt is timestamp;
     }
 
@@ -204,23 +246,45 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Users collection (Strict PII protection, no self-elevation)
+    // Banned Phones collection (admin manages; signed-in can only check a specific normalized phone doc)
+    match /bannedPhones/{phoneKey} {
+      allow get: if isValidId(phoneKey) && (isSignedIn() || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(phoneKey) && isValidBannedPhone(incoming()) && incoming().phone == phoneKey && incoming().createdAt == request.time;
+      allow delete: if isAdmin() && isValidId(phoneKey);
+    }
+
+    // Per-User Carts (strictly private to owner or admin)
+    match /carts/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isValidId(userId) &&
+        isOwner(userId) &&
+        isVerifiedUser() &&
+        isValidUserCart(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+    }
+
+    // Users collection (Strict PII protection, no self-elevation, ban check)
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
       allow list: if isAdmin();
       allow create: if isValidId(userId) &&
         isOwner(userId) &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
         isValidUserProfile(incoming()) &&
         incoming().uid == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
+        (!('isBanned' in incoming()) || incoming().isBanned == false) &&
         (
           (incoming().role == 'resident' && incoming().providerStatus == 'none') ||
           (incoming().role == 'provider' && incoming().providerStatus == 'pending')
         );
       allow update: if isValidId(userId) &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
         isValidUserProfile(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt &&
@@ -229,10 +293,13 @@ service cloud.firestore {
           isAdmin() ||
           (
             isOwner(userId) &&
+            existing().get('isBanned', false) != true &&
             incoming().role == existing().role &&
             incoming().providerStatus == existing().providerStatus &&
+            incoming().get('isBanned', false) == existing().get('isBanned', false) &&
+            incoming().get('banUntilMs', 0) == existing().get('banUntilMs', 0) &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'displayName', 'phone', 'villageId', 'neighborhood',
+              'displayName', 'phone', 'address', 'photoUrl', 'villageId', 'neighborhood',
               'serviceCategory', 'serviceTitle', 'serviceFeeEgp', 'serviceBio', 'updatedAt'
             ])
           )
@@ -252,14 +319,15 @@ service cloud.firestore {
         isAdmin();
       allow create: if isValidId(providerId) &&
         isSignedIn() &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
+        isNotBannedUser() &&
         isValidProviderListing(incoming()) &&
         incoming().ownerId == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         (isAdmin() || incoming().status == 'pending');
       allow update: if isValidId(providerId) &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
         isValidProviderListing(incoming()) &&
         incoming().ownerId == existing().ownerId &&
         incoming().createdAt == existing().createdAt &&
@@ -268,6 +336,7 @@ service cloud.firestore {
           isAdmin() ||
           (
             isOwner(existing().ownerId) &&
+            isNotBannedUser() &&
             incoming().status == existing().status &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'villageId', 'nameAr', 'nameEn', 'category', 'specialtyAr', 'specialtyEn',
@@ -291,14 +360,15 @@ service cloud.firestore {
         isAdmin();
       allow create: if isValidId(adId) &&
         isSignedIn() &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
+        isNotBannedUser() &&
         isValidVillageAd(incoming()) &&
         incoming().ownerId == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         (isAdmin() || incoming().status == 'pending');
       allow update: if isValidId(adId) &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
         isValidVillageAd(incoming()) &&
         incoming().ownerId == existing().ownerId &&
         incoming().createdAt == existing().createdAt &&
@@ -307,9 +377,11 @@ service cloud.firestore {
           isAdmin() ||
           (
             isOwner(existing().ownerId) &&
+            isNotBannedUser() &&
             incoming().status == existing().status &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'title', 'description', 'category', 'priceText', 'contactPhone', 'updatedAt'
+              'title', 'description', 'category', 'priceText', 'contactPhone',
+              'durationPlan', 'durationDays', 'costEgp', 'updatedAt'
             ])
           )
         );
@@ -322,19 +394,20 @@ service cloud.firestore {
       allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
       allow create: if isValidId(bookingId) &&
         isSignedIn() &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
+        isNotBannedUser() &&
         isValidBooking(incoming()) &&
         incoming().ownerId == request.auth.uid &&
         incoming().createdAt == request.time;
       allow update: if isValidId(bookingId) &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
         isValidBooking(incoming()) &&
         incoming().ownerId == existing().ownerId &&
         incoming().createdAt == existing().createdAt &&
         existing().status in ['pending', 'confirmed'] &&
         (
           isAdmin() ||
-          (isOwner(existing().ownerId) && incoming().diff(existing()).affectedKeys().hasOnly(['status']) && incoming().status == 'cancelled')
+          (isOwner(existing().ownerId) && isNotBannedUser() && incoming().diff(existing()).affectedKeys().hasOnly(['status']) && incoming().status == 'cancelled')
         );
       allow delete: if isAdmin() && isValidId(bookingId);
     }
@@ -345,7 +418,8 @@ service cloud.firestore {
       allow list: if true;
       allow create: if isValidId(reviewId) &&
         isSignedIn() &&
-        isVerifiedEmail() &&
+        isVerifiedUser() &&
+        isNotBannedUser() &&
         isValidReview(incoming()) &&
         incoming().ownerId == request.auth.uid &&
         incoming().createdAt == request.time;

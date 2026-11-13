@@ -6,12 +6,16 @@ import { Car, Clock, MapPin, Users, Phone, CheckCircle2 } from 'lucide-react';
 interface VillageRidesSectionProps {
   rides: VillageRide[];
   lang: Language;
+  canUseServices: boolean;
+  onRequireLogin: () => void;
   onBookRide: (ride: VillageRide) => void;
 }
 
 export const VillageRidesSection: React.FC<VillageRidesSectionProps> = ({
   rides,
   lang,
+  canUseServices,
+  onRequireLogin,
   onBookRide
 }) => {
   const t = TRANSLATIONS[lang];
@@ -80,6 +84,12 @@ export const VillageRidesSection: React.FC<VillageRidesSectionProps> = ({
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
               <a
                 href={`tel:${ride.phone}`}
+                onClick={(e) => {
+                  if (!canUseServices) {
+                    e.preventDefault();
+                    onRequireLogin();
+                  }
+                }}
                 className="flex-1 py-2 px-3 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition-colors flex items-center justify-center gap-1.5"
               >
                 <Phone className="w-3.5 h-3.5 text-blue-600" />

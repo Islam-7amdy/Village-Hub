@@ -6,12 +6,13 @@ import { X, CheckCircle2 } from 'lucide-react';
 interface UniversalBookingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  serviceType: 'doctor' | 'technician' | 'ride' | 'tutoring' | 'charity';
+  serviceType: 'doctor' | 'technician' | 'ride' | 'tutoring' | 'charity' | 'other';
   providerName: string;
   serviceTitle: string;
   lang: Language;
   defaultName?: string;
   defaultPhone?: string;
+  defaultAddress?: string;
   onConfirmBooking: (booking: BookingRequest) => void;
 }
 
@@ -24,12 +25,13 @@ export const UniversalBookingModal: React.FC<UniversalBookingModalProps> = ({
   lang,
   defaultName = '',
   defaultPhone = '',
+  defaultAddress = '',
   onConfirmBooking
 }) => {
   const t = TRANSLATIONS[lang];
   const [customerName, setCustomerName] = useState(defaultName);
   const [customerPhone, setCustomerPhone] = useState(defaultPhone);
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(defaultAddress);
   const [date, setDate] = useState('2026-11-15');
   const [time, setTime] = useState('10:00 AM');
   const [notes, setNotes] = useState('');
@@ -42,6 +44,10 @@ export const UniversalBookingModal: React.FC<UniversalBookingModalProps> = ({
   useEffect(() => {
     if (defaultPhone && !customerPhone) setCustomerPhone(defaultPhone);
   }, [defaultPhone]);
+
+  useEffect(() => {
+    if (defaultAddress && !address) setAddress(defaultAddress);
+  }, [defaultAddress]);
 
   if (!isOpen) return null;
 

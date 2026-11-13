@@ -1,7 +1,7 @@
 import React from 'react';
 import { BookingRequest, Language } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
-import { X, Calendar, CheckCircle2, Phone, Wrench, Stethoscope, Car, ShoppingBag, GraduationCap, HeartHandshake, ShoppingBasket } from 'lucide-react';
+import { X, Calendar, CheckCircle2, Phone, Wrench, Stethoscope, Car, ShoppingBag, GraduationCap, HeartHandshake, ShoppingBasket, Grid2x2 } from 'lucide-react';
 
 interface MyBookingsModalProps {
   isOpen: boolean;
@@ -34,6 +34,8 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
         return <GraduationCap className="w-4 h-4 text-indigo-500" />;
       case 'charity':
         return <HeartHandshake className="w-4 h-4 text-teal-600" />;
+      case 'other':
+        return <Grid2x2 className="w-4 h-4 text-slate-600 dark:text-slate-300" />;
       default:
         return <ShoppingBag className="w-4 h-4 text-emerald-500" />;
     }

@@ -6,6 +6,8 @@ import { Stethoscope, Calendar, Phone, Home, Clock, Star, MapPin } from 'lucide-
 interface DoctorsSectionProps {
   doctors: DoctorService[];
   lang: Language;
+  canUseServices: boolean;
+  onRequireLogin: () => void;
   onBookDoctor: (doc: DoctorService) => void;
   onViewReviews?: (targetId: string, name: string, role: string, avatar: string, rating: number, reviewsCount: number) => void;
   onAddReview?: (targetId: string, name: string, role: string) => void;
@@ -14,6 +16,8 @@ interface DoctorsSectionProps {
 export const DoctorsSection: React.FC<DoctorsSectionProps> = ({
   doctors,
   lang,
+  canUseServices,
+  onRequireLogin,
   onBookDoctor,
   onViewReviews,
   onAddReview
@@ -142,6 +146,12 @@ export const DoctorsSection: React.FC<DoctorsSectionProps> = ({
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
               <a
                 href={`tel:${doc.phone}`}
+                onClick={(e) => {
+                  if (!canUseServices) {
+                    e.preventDefault();
+                    onRequireLogin();
+                  }
+                }}
                 className="flex-1 py-2 px-3 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition-colors flex items-center justify-center gap-1.5"
               >
                 <Phone className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />

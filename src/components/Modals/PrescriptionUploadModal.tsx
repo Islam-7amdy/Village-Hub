@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Language, VillageConfig, calculateDeliveryFeeEgp } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
 import { X, Camera, CheckCircle2, Truck, MapPin } from 'lucide-react';
@@ -8,6 +8,9 @@ interface PrescriptionUploadModalProps {
   onClose: () => void;
   lang: Language;
   activeVillage: VillageConfig;
+  defaultName?: string;
+  defaultPhone?: string;
+  defaultAddress?: string;
   onPrescriptionSent: (orderInfo: {
     name: string;
     phone: string;
@@ -23,18 +26,33 @@ export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = (
   onClose,
   lang,
   activeVillage,
+  defaultName = '',
+  defaultPhone = '',
+  defaultAddress = '',
   onPrescriptionSent
 }) => {
   const t = TRANSLATIONS[lang];
-  const [patientName, setPatientName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [patientName, setPatientName] = useState(defaultName);
+  const [phone, setPhone] = useState(defaultPhone);
   const [selectedDistrictId, setSelectedDistrictId] = useState(
     activeVillage.districts[0]?.id || 'dist-center'
   );
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(defaultAddress);
   const [notes, setNotes] = useState('');
   const [hasPhoto, setHasPhoto] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  useEffect(() => {
+    if (defaultName && !patientName) setPatientName(defaultName);
+  }, [defaultName]);
+
+  useEffect(() => {
+    if (defaultPhone && !phone) setPhone(defaultPhone);
+  }, [defaultPhone]);
+
+  useEffect(() => {
+    if (defaultAddress && !address) setAddress(defaultAddress);
+  }, [defaultAddress]);
 
   if (!isOpen) return null;
 

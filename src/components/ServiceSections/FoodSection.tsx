@@ -6,12 +6,16 @@ import { Utensils, Plus, Check, Clock, ShoppingBag } from 'lucide-react';
 interface FoodSectionProps {
   foods: FoodItem[];
   lang: Language;
+  canUseServices: boolean;
+  onRequireLogin: () => void;
   onAddToCart: (item: { id: string; name: string; price: number; type: 'food' | 'pharmacy' | 'farm' }) => void;
 }
 
 export const FoodSection: React.FC<FoodSectionProps> = ({
   foods,
   lang,
+  canUseServices,
+  onRequireLogin,
   onAddToCart
 }) => {
   const t = TRANSLATIONS[lang];
@@ -30,6 +34,10 @@ export const FoodSection: React.FC<FoodSectionProps> = ({
     : foods.filter((f) => f.category === selectedCategory);
 
   const handleAdd = (item: FoodItem) => {
+    if (!canUseServices) {
+      onRequireLogin();
+      return;
+    }
     onAddToCart({
       id: item.id,
       name: item.name[lang],

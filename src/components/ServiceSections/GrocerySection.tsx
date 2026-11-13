@@ -6,12 +6,16 @@ import { ShoppingBasket, Plus, Check, Store } from 'lucide-react';
 interface GrocerySectionProps {
   items: GroceryItem[];
   lang: Language;
+  canUseServices: boolean;
+  onRequireLogin: () => void;
   onAddToCart: (item: { id: string; name: string; price: number; type: 'grocery' }) => void;
 }
 
 export const GrocerySection: React.FC<GrocerySectionProps> = ({
   items,
   lang,
+  canUseServices,
+  onRequireLogin,
   onAddToCart
 }) => {
   const t = TRANSLATIONS[lang];
@@ -32,6 +36,10 @@ export const GrocerySection: React.FC<GrocerySectionProps> = ({
       : items.filter((i) => i.category === selectedCategory);
 
   const handleAdd = (item: GroceryItem) => {
+    if (!canUseServices) {
+      onRequireLogin();
+      return;
+    }
     onAddToCart({
       id: item.id,
       name: item.name[lang],

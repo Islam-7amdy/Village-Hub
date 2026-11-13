@@ -25,6 +25,8 @@ import {
   VillageColorCode,
   getVillageTheme,
   UserProfile,
+  BannedPhoneRecord,
+  PlatformPricingConfig,
   ProviderListing,
   VillageAd,
   DoctorService,
@@ -35,6 +37,7 @@ import {
   GroceryItem,
   TutoringService,
   CharityOrg,
+  OtherService,
   BookingRequest,
   ReviewItem,
   DEFAULT_VILLAGES,
@@ -47,8 +50,11 @@ import {
   VILLAGE_GROCERY_ITEMS,
   VILLAGE_TUTORING_SERVICES,
   VILLAGE_CHARITIES,
+  VILLAGE_OTHER_SERVICES,
   INITIAL_REVIEWS,
-  INITIAL_VILLAGE_ADS
+  INITIAL_VILLAGE_ADS,
+  normalizePhone,
+  isBanCurrentlyActive
 } from './data/villageData';
 import { TRANSLATIONS } from './data/translations';
 
@@ -62,6 +68,7 @@ import { VillageRidesSection } from './components/ServiceSections/VillageRidesSe
 import { GrocerySection } from './components/ServiceSections/GrocerySection';
 import { TutoringSection } from './components/ServiceSections/TutoringSection';
 import { CharitySection } from './components/ServiceSections/CharitySection';
+import { OtherServicesSection } from './components/ServiceSections/OtherServicesSection';
 import { AdsSection } from './components/ServiceSections/AdsSection';
 
 import { UniversalBookingModal } from './components/Modals/UniversalBookingModal';
@@ -75,7 +82,7 @@ import { ProviderReviewsModal } from './components/Modals/ProviderReviewsModal';
 import { AuthModal } from './components/Modals/AuthModal';
 import { AdminDashboardModal } from './components/Modals/AdminDashboardModal';
 
-import { Clock, ShieldCheck, Briefcase, AlertCircle, MapPin } from 'lucide-react';
+import { Briefcase, AlertCircle, Ban, Phone } from 'lucide-react';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('ar');
@@ -86,24 +93,34 @@ export default function App() {
   // Firebase Auth & Profile State
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [profileLoaded, setProfileLoaded] = useState<boolean>(false);
+  const [ownPhoneBan, setOwnPhoneBan] = useState<BannedPhoneRecord | null>(null);
+  const [promptedPhoneForUid, setPromptedPhoneForUid] = useState<string | null>(null);
   const isAdmin = Boolean(
     firebaseUser?.email === ADMIN_EMAIL && firebaseUser?.emailVerified
   );
 
-  // Modular Multi-Village State
+  // Modular Multi-Village & Platform Pricing State
   const [villages, setVillages] = useState<VillageConfig[]>(DEFAULT_VILLAGES);
   const [activeVillageId, setActiveVillageId] = useState<string>('noqbas');
+  const [adPricing, setAdPricing] = useState<PlatformPricingConfig>({
+    adPriceWeekEgp: 20,
+    adPriceMonthEgp: 50
+  });
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   // Firestore Collections State
   const [firestoreProviders, setFirestoreProviders] = useState<ProviderListing[]>([]);
   const [firestoreAds, setFirestoreAds] = useState<VillageAd[]>([]);
   const [firestoreReviews, setFirestoreReviews] = useState<ReviewItem[]>([]);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [bannedPhones, setBannedPhones] = useState<BannedPhoneRecord[]>([]);
 
   // Village Base Data State
   const [localDoctors, setLocalDoctors] = useState<DoctorService[]>(VILLAGE_DOCTORS);
   const [localTechnicians, setLocalTechnicians] = useState<TechnicianService[]>(VILLAGE_TECHNICIANS);
 
-  // Cart & Bookings
+  // Per-User Isolated Cart & Bookings
   const [cart, setCart] = useState<CartItem[]>([]);
   const [bookings, setBookings] = useState<BookingRequest[]>([
     {
@@ -126,7 +143,7 @@ export default function App() {
   // Modals state
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [bookingDetails, setBookingDetails] = useState<{
-    type: 'doctor' | 'technician' | 'ride' | 'tutoring' | 'charity';
+    type: 'doctor' | 'technician' | 'ride' | 'tutoring' | 'charity' | 'other';
     providerName: string;
     title: string;
   }>({ type: 'doctor', providerName: '', title: '' });
@@ -137,7 +154,13 @@ export default function App() {
   const [isAssistantModalOpen, setIsAssistantModalOpen] = useState(false);
   const [isMyBookingsOpen, setIsMyBookingsOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+
+  const openAuthModal = (mode: 'login' | 'register' = 'login') => {
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  };
 
   // Reviews Modals state
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
@@ -158,12 +181,20 @@ export default function App() {
     reviewsCount: 0
   });
 
+  // Periodic timer for auto-expiring ads & time-limited phone bans
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
   // 1. Auth Listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
+      setProfileLoaded(false);
       if (!user) {
         setUserProfile(null);
+        setOwnPhoneBan(null);
       }
     });
     return () => unsub();
@@ -180,15 +211,118 @@ export default function App() {
         } else {
           setUserProfile(null);
         }
+        setProfileLoaded(true);
       },
       (err) => {
         console.warn('User profile listener skipped:', err.message);
+        setProfileLoaded(true);
       }
     );
     return () => unsub();
   }, [firebaseUser?.uid]);
 
-  // 3. Modular Villages + Global Active Village Listener
+  // 2b. Check Ban status on the signed-in user's normalized phone number
+  useEffect(() => {
+    if (!firebaseUser || !userProfile?.phone) {
+      setOwnPhoneBan(null);
+      return;
+    }
+    const normalized = normalizePhone(userProfile.phone);
+    if (normalized.length < 8) {
+      setOwnPhoneBan(null);
+      return;
+    }
+    const unsub = onSnapshot(
+      doc(db, 'bannedPhones', normalized),
+      (snap) => {
+        if (snap.exists()) {
+          setOwnPhoneBan(snap.data() as BannedPhoneRecord);
+        } else {
+          setOwnPhoneBan(null);
+        }
+      },
+      () => setOwnPhoneBan(null)
+    );
+    return () => unsub();
+  }, [firebaseUser?.uid, userProfile?.phone]);
+
+  // 2c. Prompt signed-in user once if they haven't linked a mobile phone yet
+  useEffect(() => {
+    if (
+      firebaseUser &&
+      profileLoaded &&
+      !isAdmin &&
+      (!userProfile || !userProfile.phone) &&
+      promptedPhoneForUid !== firebaseUser.uid
+    ) {
+      setPromptedPhoneForUid(firebaseUser.uid);
+      openAuthModal('register');
+    }
+  }, [firebaseUser, profileLoaded, isAdmin, userProfile, promptedPhoneForUid]);
+
+  // 2d. Per-User Isolated Cart Listener (Firestore /carts/{uid} + UID-scoped localStorage)
+  const cartStorageKey = firebaseUser ? `noqbas_cart_${firebaseUser.uid}` : 'noqbas_cart_guest';
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(cartStorageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setCart(Array.isArray(parsed) ? parsed : []);
+      } else {
+        setCart([]);
+      }
+    } catch {
+      setCart([]);
+    }
+
+    if (!firebaseUser) return;
+    const unsub = onSnapshot(
+      doc(db, 'carts', firebaseUser.uid),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as { items?: CartItem[] };
+          const remoteItems = Array.isArray(data.items) ? data.items : [];
+          setCart(remoteItems);
+          try {
+            localStorage.setItem(cartStorageKey, JSON.stringify(remoteItems));
+          } catch {
+            // Ignore localStorage quota issues
+          }
+        }
+      },
+      (err) => console.warn('Cart listener warning:', err.message)
+    );
+    return () => unsub();
+  }, [firebaseUser?.uid, cartStorageKey]);
+
+  // 2e. Admin-only Users & Banned Phones Listeners
+  useEffect(() => {
+    if (!isAdmin) {
+      setAllUsers([]);
+      setBannedPhones([]);
+      return;
+    }
+    const unsubUsers = onSnapshot(
+      collection(db, 'users'),
+      (snap) => {
+        setAllUsers(snap.docs.map((d) => ({ ...(d.data() as UserProfile), uid: d.id })));
+      },
+      (err) => console.warn('Admin users listener warning:', err.message)
+    );
+    const unsubBans = onSnapshot(
+      collection(db, 'bannedPhones'),
+      (snap) => {
+        setBannedPhones(snap.docs.map((d) => d.data() as BannedPhoneRecord));
+      },
+      (err) => console.warn('Admin bannedPhones listener warning:', err.message)
+    );
+    return () => {
+      unsubUsers();
+      unsubBans();
+    };
+  }, [isAdmin]);
+
+  // 3. Modular Villages + Global Active Village + Ad Pricing Listener
   useEffect(() => {
     const unsubVillages = onSnapshot(
       collection(db, 'villages'),
@@ -225,9 +359,19 @@ export default function App() {
       doc(db, 'appConfig', 'settings'),
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data() as { activeVillageId?: string };
+          const data = snap.data() as {
+            activeVillageId?: string;
+            adPriceWeekEgp?: number;
+            adPriceMonthEgp?: number;
+          };
           if (data.activeVillageId) {
             setActiveVillageId(data.activeVillageId);
+          }
+          if (typeof data.adPriceWeekEgp === 'number' || typeof data.adPriceMonthEgp === 'number') {
+            setAdPricing({
+              adPriceWeekEgp: typeof data.adPriceWeekEgp === 'number' ? data.adPriceWeekEgp : 20,
+              adPriceMonthEgp: typeof data.adPriceMonthEgp === 'number' ? data.adPriceMonthEgp : 50
+            });
           }
         }
       },
@@ -436,6 +580,8 @@ export default function App() {
       try {
         await setDoc(doc(db, 'appConfig', 'settings'), {
           activeVillageId: vid,
+          adPriceWeekEgp: adPricing.adPriceWeekEgp,
+          adPriceMonthEgp: adPricing.adPriceMonthEgp,
           updatedAt: serverTimestamp()
         });
       } catch (err) {
@@ -443,6 +589,17 @@ export default function App() {
       }
     }
   };
+
+  const isCurrentUserBanned = useMemo(
+    () =>
+      !isAdmin &&
+      (isBanCurrentlyActive(userProfile?.isBanned, userProfile?.banUntilMs, false, nowMs) ||
+        Boolean(
+          ownPhoneBan &&
+            isBanCurrentlyActive(true, ownPhoneBan.banUntilMs, ownPhoneBan.isPermanent, nowMs)
+        )),
+    [isAdmin, userProfile, ownPhoneBan, nowMs]
+  );
 
   // Merge Firestore reviews + Initial reviews
   const reviews = useMemo(() => {
@@ -616,6 +773,23 @@ export default function App() {
     return [...customRides, ...VILLAGE_RIDES];
   }, [approvedProviders]);
 
+  const allOtherServices = useMemo<OtherService[]>(() => {
+    const customOthers: OtherService[] = approvedProviders
+      .filter((p) => p.category === 'other')
+      .map((p) => ({
+        id: `prov-oth-${p.id}`,
+        villageId: p.villageId,
+        name: { ar: p.nameAr, en: p.nameEn },
+        activityType: { ar: p.specialtyAr, en: p.specialtyEn },
+        description: { ar: p.bioAr || p.specialtyAr, en: p.bioEn || p.specialtyEn },
+        address: { ar: p.neighborhoodAr || 'وسط البلد', en: p.neighborhoodEn || 'Village Center' },
+        priceLabel: { ar: p.priceLabelAr || 'حسب الاتفاق', en: p.priceLabelEn || 'By agreement' },
+        hours: { ar: 'يومياً حسب الاتفاق', en: 'Daily by appointment' },
+        phone: p.phone
+      }));
+    return [...customOthers, ...VILLAGE_OTHER_SERVICES];
+  }, [approvedProviders]);
+
   // Merge Firestore Ads + Seed Ads
   const allAds = useMemo<VillageAd[]>(() => {
     const map = new Map<string, VillageAd>();
@@ -685,17 +859,19 @@ export default function App() {
   };
 
   const handleOpenAddReviewModal = (targetId: string, name: string, role: string) => {
-    const docItem = allDoctors.find((d) => d.id === targetId);
-    const tech = allTechnicians.find((tItem) => tItem.id === targetId);
-    setActiveReviewTarget({
-      id: targetId,
-      name,
-      role,
-      avatar: docItem?.avatar || tech?.avatar || '',
-      rating: docItem?.rating || tech?.rating || 5,
-      reviewsCount: docItem?.reviewsCount || tech?.reviewsCount || 0
+    requireAuth(() => {
+      const docItem = allDoctors.find((d) => d.id === targetId);
+      const tech = allTechnicians.find((tItem) => tItem.id === targetId);
+      setActiveReviewTarget({
+        id: targetId,
+        name,
+        role,
+        avatar: docItem?.avatar || tech?.avatar || '',
+        rating: docItem?.rating || tech?.rating || 5,
+        reviewsCount: docItem?.reviewsCount || tech?.reviewsCount || 0
+      });
+      setIsReviewModalOpen(true);
     });
-    setIsReviewModalOpen(true);
   };
 
   const handleAddReview = async (newReview: ReviewItem) => {
@@ -771,19 +947,63 @@ export default function App() {
 
   const t = TRANSLATIONS[lang];
 
+  // Per-User Cart Persistence Helper
+  const updateCartStateAndStorage = (updater: (prev: CartItem[]) => CartItem[]) => {
+    setCart((prev) => {
+      const next = updater(prev);
+      try {
+        localStorage.setItem(cartStorageKey, JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+      if (firebaseUser && (firebaseUser.emailVerified || firebaseUser.phoneNumber)) {
+        setDoc(doc(db, 'carts', firebaseUser.uid), {
+          ownerId: firebaseUser.uid,
+          villageId: activeVillage.id,
+          items: next.slice(0, 50),
+          updatedAt: serverTimestamp()
+        }).catch((err) => console.warn('Cart sync warning:', err.message));
+      }
+      return next;
+    });
+  };
+
+  // Mandatory Login + Active Account Gate Helper
+  const canUsePlatformServices = Boolean(
+    firebaseUser && !isCurrentUserBanned && (isAdmin || (userProfile && userProfile.phone))
+  );
+
+  const requireAuth = (next: () => void) => {
+    if (!firebaseUser) {
+      openAuthModal('login');
+      return;
+    }
+    if (!isAdmin && (!userProfile || !userProfile.phone)) {
+      openAuthModal('register');
+      return;
+    }
+    if (isCurrentUserBanned) {
+      openAuthModal('login');
+      return;
+    }
+    next();
+  };
+
   // Cart actions
   const handleAddToCart = (item: { id: string; name: string; price: number; type: 'food' | 'pharmacy' | 'grocery' | 'farm' }) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.id === item.id);
-      if (existing) {
-        return prev.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
-      }
-      return [...prev, { ...item, quantity: 1 }];
+    requireAuth(() => {
+      updateCartStateAndStorage((prev) => {
+        const existing = prev.find((i) => i.id === item.id);
+        if (existing) {
+          return prev.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
+        }
+        return [...prev, { ...item, quantity: 1 }];
+      });
     });
   };
 
   const handleUpdateCartQuantity = (id: string, delta: number) => {
-    setCart((prev) =>
+    updateCartStateAndStorage((prev) =>
       prev
         .map((item) => (item.id === id ? { ...item, quantity: item.quantity + delta } : item))
         .filter((item) => item.quantity > 0)
@@ -791,7 +1011,11 @@ export default function App() {
   };
 
   const handleRemoveCartItem = (id: string) => {
-    setCart((prev) => prev.filter((i) => i.id !== id));
+    updateCartStateAndStorage((prev) => prev.filter((i) => i.id !== id));
+  };
+
+  const handleClearCart = () => {
+    updateCartStateAndStorage(() => []);
   };
 
   const handleCheckoutSuccess = (order: {
@@ -803,6 +1027,7 @@ export default function App() {
     total: number;
     items: CartItem[];
   }) => {
+    if (isCurrentUserBanned) return;
     const newBooking: BookingRequest = {
       id: `order-${Date.now()}`,
       villageId: activeVillage.id,
@@ -831,6 +1056,7 @@ export default function App() {
     distanceKm: number;
     deliveryFeeEgp: number;
   }) => {
+    if (isCurrentUserBanned) return;
     const newBooking: BookingRequest = {
       id: `rx-${Date.now()}`,
       villageId: activeVillage.id,
@@ -851,49 +1077,74 @@ export default function App() {
   };
 
   // Booking Modals
+  const guardBannedOrOpenBooking = (next: () => void) => {
+    requireAuth(next);
+  };
+
   const handleOpenDoctorBooking = (docItem: DoctorService) => {
-    setBookingDetails({
-      type: 'doctor',
-      providerName: docItem.name[lang],
-      title: `${t.bookClinicVisit}: ${docItem.specialty[lang]}`
+    guardBannedOrOpenBooking(() => {
+      setBookingDetails({
+        type: 'doctor',
+        providerName: docItem.name[lang],
+        title: `${t.bookClinicVisit}: ${docItem.specialty[lang]}`
+      });
+      setIsBookingOpen(true);
     });
-    setIsBookingOpen(true);
   };
 
   const handleOpenTechnicianBooking = (tech: TechnicianService) => {
-    setBookingDetails({
-      type: 'technician',
-      providerName: tech.name[lang],
-      title: `${t.requestRepair}: ${tech.craft[lang]}`
+    guardBannedOrOpenBooking(() => {
+      setBookingDetails({
+        type: 'technician',
+        providerName: tech.name[lang],
+        title: `${t.requestRepair}: ${tech.craft[lang]}`
+      });
+      setIsBookingOpen(true);
     });
-    setIsBookingOpen(true);
   };
 
   const handleOpenRideBooking = (ride: VillageRide) => {
-    setBookingDetails({
-      type: 'ride',
-      providerName: ride.driverName[lang],
-      title: `${t.bookSeat} (${ride.from[lang]} -> ${ride.to[lang]})`
+    guardBannedOrOpenBooking(() => {
+      setBookingDetails({
+        type: 'ride',
+        providerName: ride.driverName[lang],
+        title: `${t.bookSeat} (${ride.from[lang]} -> ${ride.to[lang]})`
+      });
+      setIsBookingOpen(true);
     });
-    setIsBookingOpen(true);
   };
 
   const handleOpenTutorBooking = (tutor: TutoringService) => {
-    setBookingDetails({
-      type: 'tutoring',
-      providerName: tutor.teacherName[lang],
-      title: `${t.bookLesson}: ${tutor.subject[lang]}`
+    guardBannedOrOpenBooking(() => {
+      setBookingDetails({
+        type: 'tutoring',
+        providerName: tutor.teacherName[lang],
+        title: `${t.bookLesson}: ${tutor.subject[lang]}`
+      });
+      setIsBookingOpen(true);
     });
-    setIsBookingOpen(true);
   };
 
   const handleOpenCharityContact = (org: CharityOrg) => {
-    setBookingDetails({
-      type: 'charity',
-      providerName: org.name[lang],
-      title: `${t.charityAction}: ${org.activeCampaign[lang]}`
+    guardBannedOrOpenBooking(() => {
+      setBookingDetails({
+        type: 'charity',
+        providerName: org.name[lang],
+        title: `${t.charityAction}: ${org.activeCampaign[lang]}`
+      });
+      setIsBookingOpen(true);
     });
-    setIsBookingOpen(true);
+  };
+
+  const handleOpenOtherBooking = (svc: OtherService) => {
+    guardBannedOrOpenBooking(() => {
+      setBookingDetails({
+        type: 'other',
+        providerName: svc.name[lang],
+        title: `${svc.activityType[lang]} - ${svc.name[lang]}`
+      });
+      setIsBookingOpen(true);
+    });
   };
 
   // Modular Village Scoping + Search Query Filter
@@ -958,6 +1209,13 @@ export default function App() {
       ch.activeCampaign[lang].toLowerCase().includes(q)
   );
 
+  const filteredOtherServices = byVillage(allOtherServices, true).filter(
+    (oth) =>
+      oth.name[lang].toLowerCase().includes(q) ||
+      oth.activityType[lang].toLowerCase().includes(q) ||
+      oth.description[lang].toLowerCase().includes(q)
+  );
+
   const activeVillageName = lang === 'ar' ? activeVillage.nameAr : activeVillage.nameEn;
 
   return (
@@ -974,17 +1232,20 @@ export default function App() {
           setSearchQuery('');
         }}
         cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
-        onOpenCart={() => setIsCartModalOpen(true)}
+        bookingsCount={bookings.length}
+        onOpenCart={() => requireAuth(() => setIsCartModalOpen(true))}
+        onOpenMyBookings={() => requireAuth(() => setIsMyBookingsOpen(true))}
         onOpenEmergency={() => setIsEmergencyModalOpen(true)}
-        onOpenAssistant={() => setIsAssistantModalOpen(true)}
+        onOpenAssistant={() => requireAuth(() => setIsAssistantModalOpen(true))}
         activeVillage={activeVillage}
         villages={villages}
         onSwitchVillage={handleSwitchVillage}
         isSignedIn={Boolean(firebaseUser)}
         isAdmin={isAdmin}
         userProfile={userProfile}
+        userPhotoUrl={userProfile?.photoUrl || ''}
         pendingAdminCount={pendingAdminCount}
-        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenAuth={() => openAuthModal('login')}
         onOpenAdminPanel={() => setIsAdminModalOpen(true)}
       />
 
@@ -1042,40 +1303,61 @@ export default function App() {
           </div>
         )}
 
-        {/* Quick Context Bar for Active Village, Color Code, Delivery Rate & Bookings */}
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
-          <div className="flex items-center gap-3">
-            <span className={`w-3 h-3 rounded-full ${theme.dotBg} shrink-0`} aria-hidden="true" />
-            <MapPin className={`w-4 h-4 ${theme.text} shrink-0`} />
-            <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              {lang === 'ar'
-                ? `إنت دلوقتي في ${activeVillage.nameAr} · التوصيل بيبدأ من ${activeVillage.baseDeliveryFeeEgp} ج.م + ${activeVillage.perKmFeeEgp} ج.م/كم`
-                : `Active Village: ${activeVillage.nameEn} · Delivery starts at ${activeVillage.baseDeliveryFeeEgp} EGP + ${activeVillage.perKmFeeEgp} EGP/km`}
+        {/* Banned Account Notice Banner */}
+        {isCurrentUserBanned && (
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-2xl p-4 text-xs">
+            <div className="flex items-center gap-2.5 text-rose-900 dark:text-rose-200">
+              <Ban className="w-5 h-5 text-rose-600 shrink-0" />
+              <div>
+                <div className="font-bold">
+                  {lang === 'ar'
+                    ? 'حسابك / رقم موبايلك محظور حالياً من استخدام خدمات المنصة'
+                    : 'Your account / mobile phone is currently banned from platform actions'}
+                </div>
+                <div className="text-[11px] opacity-85">
+                  {(ownPhoneBan?.banUntilMs || userProfile?.banUntilMs)
+                    ? lang === 'ar'
+                      ? `ينتهي الحظر: ${new Date((ownPhoneBan?.banUntilMs || userProfile?.banUntilMs)!).toLocaleString('ar-EG')}`
+                      : `Expires: ${new Date((ownPhoneBan?.banUntilMs || userProfile?.banUntilMs)!).toLocaleString()}`
+                    : lang === 'ar'
+                    ? 'حظر دائم'
+                    : 'Permanent ban'}
+                  {(ownPhoneBan?.reason || userProfile?.banReason)
+                    ? ` · ${ownPhoneBan?.reason || userProfile?.banReason}`
+                    : ''}
+                </div>
+              </div>
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {isAdmin && (
-              <button
-                onClick={() => setIsAdminModalOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
-              >
-                <ShieldCheck className={`w-3.5 h-3.5 ${theme.text}`} />
-                <span>{t.adminPanel} ({pendingAdminCount})</span>
-              </button>
-            )}
-
             <button
-              onClick={() => setIsMyBookingsOpen(true)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold ${theme.text} ${theme.softBg} border ${theme.border} transition-colors cursor-pointer`}
+              onClick={() => setIsAuthModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-bold cursor-pointer"
             >
-              <Clock className="w-3.5 h-3.5" />
-              <span>{t.myBookings} ({bookings.length})</span>
+              {t.account}
             </button>
           </div>
-        </div>
+        )}
 
-        {/* SECTION ROUTING (9 Core Sections + Classified Ads on Home) */}
+        {/* Mandatory Profile Completion Gate when Phone/Name/Address missing */}
+        {firebaseUser && profileLoaded && !isAdmin && !isCurrentUserBanned && (!userProfile || !userProfile.phone) && (
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-2xl p-4 text-xs">
+            <div className="flex items-center gap-2.5 text-amber-900 dark:text-amber-200">
+              <Phone className="w-4 h-4 text-amber-600 shrink-0" />
+              <span className="font-semibold">
+                {lang === 'ar'
+                  ? 'لازم تكمل بيانات حسابك (الاسم ورقم الموبايل والعنوان) عشان تقدر تستفيد من خدمات المنصة.'
+                  : 'Please complete your Name, Mobile Phone, and Address to activate platform services.'}
+              </span>
+            </div>
+            <button
+              onClick={() => openAuthModal('register')}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-600 text-white font-bold cursor-pointer"
+            >
+              {lang === 'ar' ? 'إكمال بيانات الحساب' : 'Complete Account'}
+            </button>
+          </div>
+        )}
+
+        {/* SECTION ROUTING (10 Core Sections + Timed Classified Ads on Home - Free to browse, login required on action) */}
         {activeTab === 'all' && (
           <AdsSection
             ads={allAds}
@@ -1084,8 +1366,13 @@ export default function App() {
             activeVillageName={activeVillageName}
             currentUserId={firebaseUser?.uid || null}
             currentUserName={userProfile?.displayName || firebaseUser?.displayName || (lang === 'ar' ? 'معلن من القرية' : 'Village Advertiser')}
+            defaultPhone={userProfile?.phone || ''}
             isAdmin={isAdmin}
-            onRequireLogin={() => setIsAuthModalOpen(true)}
+            isBanned={isCurrentUserBanned}
+            adPricing={adPricing}
+            nowMs={nowMs}
+            canUseServices={canUsePlatformServices}
+            onRequireLogin={() => openAuthModal('login')}
           />
         )}
 
@@ -1094,6 +1381,8 @@ export default function App() {
             <DoctorsSection
               doctors={filteredDoctors}
               lang={lang}
+              canUseServices={canUsePlatformServices}
+              onRequireLogin={() => openAuthModal('login')}
               onBookDoctor={handleOpenDoctorBooking}
               onViewReviews={handleOpenReviewsModal}
               onAddReview={handleOpenAddReviewModal}
@@ -1106,7 +1395,7 @@ export default function App() {
                   : `No approved doctors registered yet in ${activeVillage.nameEn}.`}
               </p>
               <button
-                onClick={() => setIsAuthModalOpen(true)}
+                onClick={() => openAuthModal('register')}
                 className={`px-4 py-2 rounded-xl ${theme.solidBg} ${theme.hoverBg} text-white text-xs font-bold cursor-pointer`}
               >
                 {lang === 'ar' ? 'سجل كدكتور أو مقدم خدمة في القرية' : 'Register as a Provider'}
@@ -1119,8 +1408,10 @@ export default function App() {
           <PharmacySection
             items={filteredPharmacy}
             lang={lang}
+            canUseServices={canUsePlatformServices}
+            onRequireLogin={() => openAuthModal('login')}
             onAddToCart={handleAddToCart}
-            onOpenUploadPrescription={() => setIsPrescriptionModalOpen(true)}
+            onOpenUploadPrescription={() => requireAuth(() => setIsPrescriptionModalOpen(true))}
           />
         )}
 
@@ -1128,6 +1419,8 @@ export default function App() {
           <FoodSection
             foods={filteredFoods}
             lang={lang}
+            canUseServices={canUsePlatformServices}
+            onRequireLogin={() => openAuthModal('login')}
             onAddToCart={handleAddToCart}
           />
         )}
@@ -1137,6 +1430,8 @@ export default function App() {
             <TechniciansSection
               technicians={filteredTechnicians}
               lang={lang}
+              canUseServices={canUsePlatformServices}
+              onRequireLogin={() => openAuthModal('login')}
               onRequestTechnician={handleOpenTechnicianBooking}
               onViewReviews={handleOpenReviewsModal}
               onAddReview={handleOpenAddReviewModal}
@@ -1149,7 +1444,7 @@ export default function App() {
                   : `No approved technicians registered yet in ${activeVillage.nameEn}.`}
               </p>
               <button
-                onClick={() => setIsAuthModalOpen(true)}
+                onClick={() => openAuthModal('register')}
                 className={`px-4 py-2 rounded-xl ${theme.solidBg} ${theme.hoverBg} text-white text-xs font-bold cursor-pointer`}
               >
                 {lang === 'ar' ? 'سجل كصنايعي في القرية دي' : 'Register as a Technician'}
@@ -1162,6 +1457,8 @@ export default function App() {
           <VillageRidesSection
             rides={filteredRides}
             lang={lang}
+            canUseServices={canUsePlatformServices}
+            onRequireLogin={() => openAuthModal('login')}
             onBookRide={handleOpenRideBooking}
           />
         )}
@@ -1170,6 +1467,8 @@ export default function App() {
           <GrocerySection
             items={filteredGrocery}
             lang={lang}
+            canUseServices={canUsePlatformServices}
+            onRequireLogin={() => openAuthModal('login')}
             onAddToCart={handleAddToCart}
           />
         )}
@@ -1178,6 +1477,8 @@ export default function App() {
           <TutoringSection
             tutors={filteredTutors}
             lang={lang}
+            canUseServices={canUsePlatformServices}
+            onRequireLogin={() => openAuthModal('login')}
             onBookTutor={handleOpenTutorBooking}
           />
         )}
@@ -1186,7 +1487,19 @@ export default function App() {
           <CharitySection
             charities={filteredCharities}
             lang={lang}
+            canUseServices={canUsePlatformServices}
+            onRequireLogin={() => openAuthModal('login')}
             onContactCharity={handleOpenCharityContact}
+          />
+        )}
+
+        {(activeTab === 'all' || activeTab === 'other') && filteredOtherServices.length > 0 && (
+          <OtherServicesSection
+            items={filteredOtherServices}
+            lang={lang}
+            canUseServices={canUsePlatformServices}
+            onRequireLogin={() => openAuthModal('login')}
+            onRequestOther={handleOpenOtherBooking}
           />
         )}
       </main>
@@ -1196,9 +1509,13 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         lang={lang}
+        initialMode={authModalMode}
         firebaseUser={firebaseUser}
         userProfile={userProfile}
         isAdmin={isAdmin}
+        isBanned={isCurrentUserBanned}
+        banReason={ownPhoneBan?.reason || userProfile?.banReason}
+        banUntilMs={ownPhoneBan?.banUntilMs || userProfile?.banUntilMs}
         villages={villages}
         activeVillageId={activeVillage.id}
         onProfileSaved={() => {}}
@@ -1212,8 +1529,14 @@ export default function App() {
           lang={lang}
           providers={firestoreProviders}
           ads={firestoreAds}
+          users={allUsers}
+          bannedPhones={bannedPhones}
+          bookings={bookings}
+          reviewsCount={reviews.length}
           villages={villages}
           activeVillageId={activeVillage.id}
+          adPricing={adPricing}
+          nowMs={nowMs}
           onSwitchVillage={handleSwitchVillage}
           onVillageAdded={(v) => {
             setVillages((prev) => {
@@ -1233,6 +1556,7 @@ export default function App() {
         lang={lang}
         defaultName={userProfile?.displayName || firebaseUser?.displayName || ''}
         defaultPhone={userProfile?.phone || ''}
+        defaultAddress={userProfile?.address || userProfile?.neighborhood || ''}
         onConfirmBooking={persistBooking}
       />
 
@@ -1241,6 +1565,9 @@ export default function App() {
         onClose={() => setIsPrescriptionModalOpen(false)}
         lang={lang}
         activeVillage={activeVillage}
+        defaultName={userProfile?.displayName || firebaseUser?.displayName || ''}
+        defaultPhone={userProfile?.phone || ''}
+        defaultAddress={userProfile?.address || userProfile?.neighborhood || ''}
         onPrescriptionSent={handlePrescriptionSent}
       />
 
@@ -1252,9 +1579,10 @@ export default function App() {
         activeVillage={activeVillage}
         defaultName={userProfile?.displayName || firebaseUser?.displayName || ''}
         defaultPhone={userProfile?.phone || ''}
+        defaultAddress={userProfile?.address || userProfile?.neighborhood || ''}
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveCartItem}
-        onClearCart={() => setCart([])}
+        onClearCart={handleClearCart}
         onCheckoutSuccess={handleCheckoutSuccess}
       />
 
@@ -1291,7 +1619,7 @@ export default function App() {
         lang={lang}
         onOpenAddReview={() => {
           setIsProviderReviewsModalOpen(false);
-          setIsReviewModalOpen(true);
+          requireAuth(() => setIsReviewModalOpen(true));
         }}
       />
 
@@ -1315,13 +1643,11 @@ export default function App() {
             </span>
             <span>·</span>
             <span>{t.appTagline}</span>
-            <span>·</span>
-            <span>{lang === 'ar' ? 'الأسعار بالجنيه المصري (ج.م)' : 'Currency: EGP'}</span>
           </div>
 
           <div className="flex items-center gap-4 text-xs">
             <button
-              onClick={() => setIsAuthModalOpen(true)}
+              onClick={() => openAuthModal('login')}
               className="text-slate-700 dark:text-slate-300 font-semibold hover:underline cursor-pointer"
             >
               {firebaseUser ? t.account : t.login}
@@ -1335,7 +1661,7 @@ export default function App() {
             </button>
             <span>·</span>
             <button
-              onClick={() => setIsAssistantModalOpen(true)}
+              onClick={() => requireAuth(() => setIsAssistantModalOpen(true))}
               className={`${theme.text} font-semibold hover:underline cursor-pointer`}
             >
               {t.aiAssistant}

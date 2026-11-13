@@ -6,6 +6,8 @@ import { Wrench, Phone, MessageCircle, Calendar, Star, MapPin, CheckCircle2 } fr
 interface TechniciansSectionProps {
   technicians: TechnicianService[];
   lang: Language;
+  canUseServices: boolean;
+  onRequireLogin: () => void;
   onRequestTechnician: (tech: TechnicianService) => void;
   onViewReviews?: (targetId: string, name: string, role: string, avatar: string, rating: number, reviewsCount: number) => void;
   onAddReview?: (targetId: string, name: string, role: string) => void;
@@ -14,6 +16,8 @@ interface TechniciansSectionProps {
 export const TechniciansSection: React.FC<TechniciansSectionProps> = ({
   technicians,
   lang,
+  canUseServices,
+  onRequireLogin,
   onRequestTechnician,
   onViewReviews,
   onAddReview
@@ -152,6 +156,12 @@ export const TechniciansSection: React.FC<TechniciansSectionProps> = ({
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
               <a
                 href={`tel:${tech.phone}`}
+                onClick={(e) => {
+                  if (!canUseServices) {
+                    e.preventDefault();
+                    onRequireLogin();
+                  }
+                }}
                 className="flex-1 py-2 px-2.5 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition-colors flex items-center justify-center gap-1.5"
               >
                 <Phone className="w-3.5 h-3.5 text-amber-600" />
@@ -162,6 +172,12 @@ export const TechniciansSection: React.FC<TechniciansSectionProps> = ({
                 href={`https://wa.me/${tech.whatsapp}`}
                 target="_blank"
                 rel="noreferrer"
+                onClick={(e) => {
+                  if (!canUseServices) {
+                    e.preventDefault();
+                    onRequireLogin();
+                  }
+                }}
                 className="flex-1 py-2 px-2.5 text-xs font-semibold rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900 transition-colors flex items-center justify-center gap-1.5"
               >
                 <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />

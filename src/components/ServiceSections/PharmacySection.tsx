@@ -6,6 +6,8 @@ import { Pill, Camera, Plus, Check, Truck, ShieldAlert, CheckCircle2 } from 'luc
 interface PharmacySectionProps {
   items: PharmacyItem[];
   lang: Language;
+  canUseServices: boolean;
+  onRequireLogin: () => void;
   onAddToCart: (item: { id: string; name: string; price: number; type: 'food' | 'pharmacy' | 'farm' }) => void;
   onOpenUploadPrescription: () => void;
 }
@@ -13,6 +15,8 @@ interface PharmacySectionProps {
 export const PharmacySection: React.FC<PharmacySectionProps> = ({
   items,
   lang,
+  canUseServices,
+  onRequireLogin,
   onAddToCart,
   onOpenUploadPrescription
 }) => {
@@ -33,6 +37,10 @@ export const PharmacySection: React.FC<PharmacySectionProps> = ({
     : items.filter((p) => p.category === selectedCategory);
 
   const handleAdd = (item: PharmacyItem) => {
+    if (!canUseServices) {
+      onRequireLogin();
+      return;
+    }
     onAddToCart({
       id: item.id,
       name: item.name[lang],

@@ -23,6 +23,7 @@ interface CartModalProps {
   activeVillage: VillageConfig;
   defaultName?: string;
   defaultPhone?: string;
+  defaultAddress?: string;
   onUpdateQuantity: (id: string, delta: number) => void;
   onRemoveItem: (id: string) => void;
   onClearCart: () => void;
@@ -45,6 +46,7 @@ export const CartModal: React.FC<CartModalProps> = ({
   activeVillage,
   defaultName = '',
   defaultPhone = '',
+  defaultAddress = '',
   onUpdateQuantity,
   onRemoveItem,
   onClearCart,
@@ -53,7 +55,7 @@ export const CartModal: React.FC<CartModalProps> = ({
   const t = TRANSLATIONS[lang];
   const [customerName, setCustomerName] = useState(defaultName);
   const [customerPhone, setCustomerPhone] = useState(defaultPhone);
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(defaultAddress);
   const [deliveryMode, setDeliveryMode] = useState<'delivery' | 'pickup'>('delivery');
   const [selectedDistrictId, setSelectedDistrictId] = useState(
     activeVillage.districts[0]?.id || 'dist-center'
@@ -70,6 +72,10 @@ export const CartModal: React.FC<CartModalProps> = ({
   useEffect(() => {
     if (defaultPhone && !customerPhone) setCustomerPhone(defaultPhone);
   }, [defaultPhone]);
+
+  useEffect(() => {
+    if (defaultAddress && !address) setAddress(defaultAddress);
+  }, [defaultAddress]);
 
   useEffect(() => {
     const first = activeVillage.districts[0];

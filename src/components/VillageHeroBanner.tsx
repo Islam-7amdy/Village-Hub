@@ -11,7 +11,8 @@ import {
   Car,
   ShoppingBasket,
   GraduationCap,
-  HeartHandshake
+  HeartHandshake,
+  Shapes
 } from 'lucide-react';
 
 interface VillageHeroBannerProps {
@@ -43,7 +44,8 @@ export const VillageHeroBanner: React.FC<VillageHeroBannerProps> = ({
     { id: 'rides', label: t.rides, icon: Car, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-900/60' },
     { id: 'grocery', label: t.grocery, icon: ShoppingBasket, color: 'text-lime-700 bg-lime-50 dark:bg-lime-950/50 border-lime-200 dark:border-lime-900/60' },
     { id: 'tutoring', label: t.tutoring, icon: GraduationCap, color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-900/60' },
-    { id: 'charity', label: t.charity, icon: HeartHandshake, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-900/60' }
+    { id: 'charity', label: t.charity, icon: HeartHandshake, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-900/60' },
+    { id: 'other', label: t.other, icon: Shapes, color: 'text-purple-600 bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-900/60' }
   ];
 
   return (
@@ -65,10 +67,6 @@ export const VillageHeroBanner: React.FC<VillageHeroBannerProps> = ({
             <span>{lang === 'ar' ? activeVillage.nameAr : activeVillage.nameEn}</span>
             <span aria-hidden="true">·</span>
             <span>{lang === 'ar' ? activeVillage.governorateAr : activeVillage.governorateEn}</span>
-            <span aria-hidden="true">·</span>
-            <span className="text-slate-200 font-normal">
-              {lang === 'ar' ? 'التعامل بالجنيه المصري (ج.م)' : 'All prices in EGP'}
-            </span>
           </div>
 
           <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight leading-tight text-balance">
@@ -101,8 +99,8 @@ export const VillageHeroBanner: React.FC<VillageHeroBannerProps> = ({
         </div>
       </div>
 
-      {/* Exact 9 Service Categories Strip */}
-      <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2.5">
+      {/* All 10 Service Categories Strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2.5">
         {categories.map((cat) => {
           const Icon = cat.icon;
           const isActive = activeTab === cat.id;

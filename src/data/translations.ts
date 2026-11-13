@@ -14,6 +14,7 @@ export const TRANSLATIONS = {
     grocery: 'بقالة وسوبر ماركت',
     tutoring: 'دروس ومعلمون',
     charity: 'الجمعيات الخيرية',
+    other: 'أخرى',
     ads: 'إعلانات وعروض',
     emergency: 'أرقام الطوارئ',
     aiAssistant: 'اسأل المساعد',
@@ -28,7 +29,7 @@ export const TRANSLATIONS = {
     callNow: 'اتصل بيه',
     orderSuccess: 'تمام! طلبك اتبعت وهيتجهز حالاً',
     requestRepair: 'اطلب صنايعي للبيت',
-    addToCart: 'حط في السلة',
+    addToCart: 'أضف إلى السلة',
     sendPrescription: 'ابعت صورة الروشتة',
     searchPlaceholder: 'بتدور على إيه في البلد؟ (دكتور، صيدلية، مطعم، سباك، بقالة، مدرس)...',
     close: 'اقفل',
@@ -78,7 +79,15 @@ export const TRANSLATIONS = {
     deliveryZone: 'منطقتك (عشان نحسب التوصيل)',
     distanceKm: 'المسافة التقريبية',
     submitAd: 'اعمل إعلان جديد',
-    pendingApproval: 'قيد المراجعة من الأدمن'
+    pendingApproval: 'قيد المراجعة من الأدمن',
+    loginRequiredGateTitle: 'لا يمكن الاستفادة من خدمات المنصة إلا بعد تسجيل الدخول',
+    loginRequiredGateSubtitle: 'عشان تحجز دكتور أو صنايعي أو تطلب أكل وأدوية أو تضيف إعلان، سجل دخولك برقم الموبايل الأول.',
+    existingAccountTab: 'لديك حساب بالفعل — تسجيل الدخول',
+    newUserTab: 'مستخدم جديد — تسجيل جديد',
+    sendSmsCode: 'إرسال كود التأكيد في رسالة SMS',
+    verifySmsCode: 'تأكيد الكود والدخول',
+    smsOtpLabel: 'كود التأكيد (6 أرقام من الرسالة النصية)',
+    fullAddressLabel: 'العنوان بالتفصيل (الناحية / الشارع / علامة مميزة)'
   },
   en: {
     appName: 'Noqbas',
@@ -95,6 +104,7 @@ export const TRANSLATIONS = {
     grocery: 'Grocery & Supermarket',
     tutoring: 'Tutoring & Teachers',
     charity: 'Charities & Aid',
+    other: 'Other',
     ads: 'Village Ads & Offers',
     emergency: 'Emergency',
     aiAssistant: 'Village Assistant',
@@ -159,6 +169,14 @@ export const TRANSLATIONS = {
     deliveryZone: 'Delivery Zone (for fee calculation)',
     distanceKm: 'Distance',
     submitAd: 'Submit New Ad',
-    pendingApproval: 'Pending Admin Approval'
+    pendingApproval: 'Pending Admin Approval',
+    loginRequiredGateTitle: 'Sign in required to access platform services',
+    loginRequiredGateSubtitle: 'To book clinics, request craftsmen, order groceries/pharmacy, or post ads, please sign in with your mobile phone first.',
+    existingAccountTab: 'Already have an account — Sign In',
+    newUserTab: 'New User — Create Account',
+    sendSmsCode: 'Send SMS Verification Code',
+    verifySmsCode: 'Verify Code & Continue',
+    smsOtpLabel: 'SMS Verification Code (6 digits)',
+    fullAddressLabel: 'Full Address (Quarter / Street / Landmark)'
   }
 };

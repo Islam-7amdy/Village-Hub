@@ -174,8 +174,8 @@ app.post('/api/village-assistant', async (req: Request, res: Response) => {
   const vName = villageName || (isArabic ? 'قرية ىقباس' : 'Noqbas Village');
 
   const fallbackReply = isArabic
-    ? `أهلاً بيك يا جاري العزيز في منصة ${vName}! تقدر تحجز كشف في قسم أطباء وعيادات، تطلب دواء من الصيدليات، أو أكل من مطاعم وكافيهات، أو مقاضي البيت من بقالة وسوبر ماركت، وكمان تحجز مواصلات أو دروس ومعلمون أو تتواصل مع الجمعيات الخيرية. اختار القسم اللي محتاجه من فوق!`
-    : `Welcome, neighbor to ${vName}! You can book Doctors & Clinics, order from Pharmacies, Restaurants & Cafes, Grocery & Supermarket, find Technicians, book Rides, Tutoring, or reach Charities from the navigation menu!`;
+    ? `أهلاً بيك يا جاري العزيز في منصة ${vName}! تقدر تحجز كشف في قسم أطباء وعيادات، تطلب دواء من الصيدليات، أو أكل من مطاعم وكافيهات، أو مقاضي البيت من بقالة وسوبر ماركت، وكمان تحجز مواصلات أو دروس ومعلمون أو تتواصل مع الجمعيات الخيرية أو تشوف قسم أخرى. اختار القسم اللي محتاجه من فوق!`
+    : `Welcome, neighbor to ${vName}! You can book Doctors & Clinics, order from Pharmacies, Restaurants & Cafes, Grocery & Supermarket, find Technicians, book Rides, Tutoring, Charities, or browse Other services from the navigation menu!`;
 
   if (!aiClient) {
     res.json({ answer: fallbackReply });
@@ -197,7 +197,8 @@ Village sections available in the app:
 6. بقالة وسوبر ماركت (Grocery & Supermarket): Daily pantry staples, cooking oil, rice, dairy, and fresh produce delivered to the house.
 7. دروس ومعلمون (Tutoring & Teachers): Math, English, Science, and Quran circles for primary/prep/secondary students.
 8. الجمعيات الخيرية (Charities): Community aid, medical convoys, food boxes, and confidential charitable support.
-9. إعلانات أهل القرية (Classified Ads): Approved resident/shop offers displayed on the Home tab.
+9. أخرى (Other Services): Print shops, stationery, mobile repair, carpet laundry, wedding event tents, and any activity not listed above.
+10. إعلانات أهل القرية (Classified Ads): Timed approved resident/shop offers displayed on the Home tab.
 
 Give a concise, helpful response (2-3 short sentences) in ${isArabic ? 'Egyptian Colloquial Arabic' : 'English'} guiding them directly to the right section or provider.`;
 
