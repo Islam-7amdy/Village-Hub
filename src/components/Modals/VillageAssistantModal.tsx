@@ -17,7 +17,7 @@ export const VillageAssistantModal: React.FC<VillageAssistantModalProps> = ({
   activeVillageName
 }) => {
   const t = TRANSLATIONS[lang];
-  const vName = activeVillageName || (lang === 'ar' ? 'قرية ىقباس' : 'Noqbas Village');
+  const vName = activeVillageName || (lang === 'ar' ? 'قرية نقباس' : 'Noqbas Village');
   const [question, setQuestion] = useState('');
   const [chatLog, setChatLog] = useState<Array<{ sender: 'user' | 'assistant'; text: string }>>([
     {

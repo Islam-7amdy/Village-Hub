@@ -1,20 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import {
   Language,
   VillageAd,
+  VillageConfig,
   PlatformPricingConfig,
+  getVillageTheme,
   isAdExpired
 } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
-import { Tag, Plus, Phone, CheckCircle2, Clock, X, Megaphone, CalendarClock } from 'lucide-react';
+import {
+  Plus,
+  Phone,
+  CheckCircle2,
+  Clock,
+  X,
+  Megaphone,
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight
+} from 'lucide-react';
 
 interface AdsSectionProps {
   ads: VillageAd[];
   lang: Language;
   activeVillageId: string;
   activeVillageName: string;
+  activeVillage?: VillageConfig;
   currentUserId: string | null;
   currentUserName: string;
   defaultPhone?: string;
@@ -31,6 +44,7 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
   lang,
   activeVillageId,
   activeVillageName,
+  activeVillage,
   currentUserId,
   currentUserName,
   defaultPhone,
@@ -42,7 +56,10 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
   onRequireLogin
 }) => {
   const t = TRANSLATIONS[lang];
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const theme = getVillageTheme(activeVillage?.colorCode);
+
+  const [spotlightIndex, setSpotlightIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Form state
@@ -56,7 +73,6 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
   const [submittedNotice, setSubmittedNotice] = useState('');
 
   const categories = [
-    { id: 'all', ar: 'كل الإعلانات', en: 'All Ads' },
     { id: 'offer', ar: 'عروض وتخفيضات', en: 'Offers & Deals' },
     { id: 'shop', ar: 'محلات وتجارة', en: 'Shops & Goods' },
     { id: 'property', ar: 'شقق وأراضي وإيجار', en: 'Real Estate' },
@@ -76,8 +92,7 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
     (ad) =>
       ad.status === 'approved' &&
       !isAdExpired(ad.expiresAtMs, nowMs) &&
-      (ad.villageId === activeVillageId || !ad.villageId) &&
-      (selectedCategory === 'all' || ad.category === selectedCategory)
+      (ad.villageId === activeVillageId || !ad.villageId)
   );
 
   const myPendingAds = ads.filter(
@@ -86,6 +101,21 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
       ad.ownerId === currentUserId &&
       ad.status !== 'approved'
   );
+
+  useEffect(() => {
+    setSpotlightIndex(0);
+  }, [activeVillageId]);
+
+  useEffect(() => {
+    if (approvedAds.length <= 1 || isPaused || isModalOpen) return;
+    const timer = window.setInterval(() => {
+      setSpotlightIndex((prev) => (prev + 1) % approvedAds.length);
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, [approvedAds.length, isPaused, isModalOpen]);
+
+  const safeSpotlightIndex = approvedAds.length > 0 ? spotlightIndex % approvedAds.length : 0;
+  const featuredAd = approvedAds[safeSpotlightIndex];
 
   const handleOpenCreate = () => {
     if (!currentUserId || !canUseServices) {
@@ -167,58 +197,170 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
     }
   };
 
+  const handlePrevSlide = () => {
+    if (approvedAds.length <= 1) return;
+    setSpotlightIndex((prev) => (prev - 1 + approvedAds.length) % approvedAds.length);
+  };
+
+  const handleNextSlide = () => {
+    if (approvedAds.length <= 1) return;
+    setSpotlightIndex((prev) => (prev + 1) % approvedAds.length);
+  };
+
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-200 dark:border-slate-800">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 flex items-center justify-center">
-            <Tag className="w-4 h-4" />
+    <div
+      className="rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs"
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+    >
+      {/* Hero Showcase Band: Featured Ads & Offers */}
+      <div className="relative bg-slate-900 text-white">
+        <div className={`bg-gradient-to-br ${theme.heroTint} p-5 sm:p-8`}>
+          {/* Showcase Header Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-5 border-b border-white/15">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className={`w-10 h-10 rounded-2xl ${theme.solidBg} text-white flex items-center justify-center shrink-0 shadow-sm`}>
+                <Megaphone className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-white/80 font-medium">
+                  <span>{activeVillageName}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    {lang === 'ar'
+                      ? `${approvedAds.length} إعلان وعرض ساري`
+                      : `${approvedAds.length} active offers`}
+                  </span>
+                </div>
+                <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-white truncate">
+                  {lang === 'ar' ? `إعلانات وعروض ${activeVillageName}` : `${activeVillageName} Ads & Offers`}
+                </h1>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              disabled={isBanned}
+              className={`min-h-[40px] flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white transition-colors shrink-0 ${
+                isBanned
+                  ? 'bg-slate-500 cursor-not-allowed'
+                  : `${theme.solidBg} ${theme.hoverBg} cursor-pointer shadow-sm`
+              }`}
+            >
+              <Plus className="w-4 h-4" />
+              <span>{t.submitAd}</span>
+            </button>
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">{t.ads}</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {lang === 'ar'
-                ? `عروض المحلات، شقق الإيجار، وفرص الشغل في ${activeVillageName} (تختفي تلقائياً بانتهاء المدة)`
-                : `Local deals, rentals, and jobs in ${activeVillageName} (auto-expire after duration)`}
-            </p>
+
+          {/* Spotlight Featured Offer Card */}
+          <div className="pt-5 min-h-[168px] flex flex-col justify-between gap-5">
+            {featuredAd ? (
+              <>
+                <div className="space-y-2.5 max-w-3xl">
+                  {/* Clean unboxed typographic metadata strip */}
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-white/85">
+                    <span className="text-amber-300">{getCategoryLabel(featuredAd.category)}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{featuredAd.authorName}</span>
+                    {formatRemainingDays(featuredAd.expiresAtMs) && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="inline-flex items-center gap-1 text-emerald-300">
+                          <CalendarClock className="w-3.5 h-3.5" />
+                          {formatRemainingDays(featuredAd.expiresAtMs)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  <h2 className="text-xl sm:text-3xl font-extrabold tracking-tight leading-tight text-balance text-white">
+                    {featuredAd.title}
+                  </h2>
+
+                  <p className="text-xs sm:text-sm text-slate-200 leading-relaxed max-w-2xl line-clamp-2">
+                    {featuredAd.description}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="text-sm sm:text-base font-extrabold font-mono tabular-nums text-emerald-300">
+                      {featuredAd.priceText || (lang === 'ar' ? 'تواصل لمعرفة السعر' : 'Call for price')}
+                    </div>
+
+                    <a
+                      href={`tel:${featuredAd.contactPhone}`}
+                      onClick={(e) => {
+                        if (!canUseServices) {
+                          e.preventDefault();
+                          onRequireLogin();
+                        }
+                      }}
+                      className="min-h-[40px] px-4 py-2 rounded-xl bg-white text-slate-900 hover:bg-slate-100 text-xs font-bold flex items-center gap-2 transition-colors shadow-sm"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      <span className="font-mono tabular-nums">{featuredAd.contactPhone}</span>
+                    </a>
+                  </div>
+
+                  {/* Slide Switcher Controls */}
+                  {approvedAds.length > 1 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono tabular-nums text-white/80">
+                        {safeSpotlightIndex + 1} / {approvedAds.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handlePrevSlide}
+                        aria-label={lang === 'ar' ? 'الإعلان السابق' : 'Previous ad'}
+                        className="w-10 h-10 rounded-xl bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer"
+                      >
+                        {lang === 'ar' ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleNextSlide}
+                        aria-label={lang === 'ar' ? 'الإعلان التالي' : 'Next ad'}
+                        className="w-10 h-10 rounded-xl bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer"
+                      >
+                        {lang === 'ar' ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <h2 className="text-lg sm:text-2xl font-extrabold text-white">
+                    {lang === 'ar'
+                      ? `اعرض شغلك أو عرضك قدام كل أهالي ${activeVillageName}`
+                      : `Showcase your shop, rental, or deal across ${activeVillageName}`}
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-200 max-w-xl">
+                    {lang === 'ar'
+                      ? `تقدر تضيف إعلان عروض المحلات أو الشقق أو فرص الشغل في المكان ده (يبدأ من ${adPricing.adPriceWeekEgp} ${t.currency} للأسبوع).`
+                      : `Publish local deals, rentals, or job listings here (starting from ${adPricing.adPriceWeekEgp} ${t.currency}/week).`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  disabled={isBanned}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-white text-slate-900 hover:bg-slate-100 text-xs font-bold shrink-0 cursor-pointer"
+                >
+                  {lang === 'ar' ? 'أضف أول إعلان الآن' : 'Post First Ad'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
-
-        <button
-          onClick={handleOpenCreate}
-          disabled={isBanned}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white transition-colors shrink-0 ${
-            isBanned
-              ? 'bg-slate-400 cursor-not-allowed'
-              : 'bg-amber-600 hover:bg-amber-700 cursor-pointer'
-          }`}
-        >
-          <Plus className="w-4 h-4" />
-          <span>{t.submitAd}</span>
-        </button>
       </div>
 
-      {/* Category Filter Buttons */}
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        {categories.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setSelectedCategory(c.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              selectedCategory === c.id
-                ? 'bg-amber-600 text-white shadow-xs'
-                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-slate-300'
-            }`}
-          >
-            {c[lang]}
-          </button>
-        ))}
-      </div>
-
-      {/* User's Pending / Rejected Ads Notice */}
+      {/* User's Pending / Rejected Ads Notice (shown only when user has pending/rejected submissions) */}
       {myPendingAds.length > 0 && (
-        <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 space-y-2 text-xs">
+        <div className="p-3.5 sm:px-5 bg-amber-50/80 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-900/50 space-y-1.5 text-xs">
           <div className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
             <Clock className="w-4 h-4 text-amber-600" />
             <span>
@@ -251,85 +393,17 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
         </div>
       )}
 
-      {/* Approved Active (Non-Expired) Ads Grid */}
-      {approvedAds.length === 0 ? (
-        <div className="p-8 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center text-xs text-slate-500">
-          {lang === 'ar'
-            ? 'مفيش إعلانات سارية في القسم ده حالياً — كن أول واحد يضيف إعلان!'
-            : 'No active ads in this category yet — be the first to submit one!'}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {approvedAds.map((ad) => {
-            const remainingLabel = formatRemainingDays(ad.expiresAtMs);
-            return (
-              <div
-                key={ad.id}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-all flex flex-col justify-between space-y-4"
-              >
-                <div className="space-y-2.5">
-                  {/* Unboxed metadata line per zero-pill discipline */}
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                    <span className="text-amber-700 dark:text-amber-400 font-semibold">
-                      {getCategoryLabel(ad.category)}
-                    </span>
-                    <span aria-hidden="true">·</span>
-                    <span className="truncate">{ad.authorName}</span>
-                    {remainingLabel && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-semibold">
-                          <CalendarClock className="w-3 h-3" />
-                          {remainingLabel}
-                        </span>
-                      </>
-                    )}
-                  </div>
-
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white leading-snug">
-                    {ad.title}
-                  </h3>
-
-                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                    {ad.description}
-                  </p>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                  <div className="text-xs font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
-                    {ad.priceText || (lang === 'ar' ? 'تواصل للسعر' : 'Call for price')}
-                  </div>
-
-                  <a
-                    href={`tel:${ad.contactPhone}`}
-                    onClick={(e) => {
-                      if (!canUseServices) {
-                        e.preventDefault();
-                        onRequireLogin();
-                      }
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-amber-600 hover:text-white text-slate-800 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                  >
-                    <Phone className="w-3.5 h-3.5" />
-                    <span className="font-mono tabular-nums">{ad.contactPhone}</span>
-                  </a>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       {/* Submit Ad Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[92vh] flex flex-col">
             <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Megaphone className="w-5 h-5 text-amber-600" />
+                <Megaphone className={`w-5 h-5 ${theme.text}`} />
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">{t.submitAd}</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer"
               >
@@ -343,7 +417,7 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
                 <div className="text-sm font-bold text-slate-900 dark:text-white">{submittedNotice}</div>
               </div>
             ) : (
-              <form onSubmit={handleSubmitAd} className="p-6 space-y-4 text-xs overflow-y-auto">
+              <form key="submit-ad-form" onSubmit={handleSubmitAd} className="p-6 space-y-4 text-xs overflow-y-auto">
                 <div>
                   <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     {lang === 'ar' ? 'عنوان الإعلان *' : 'Ad Title *'}
@@ -369,14 +443,14 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
                       onClick={() => setDurationPlan('week')}
                       className={`p-3 rounded-2xl border text-start transition-all cursor-pointer ${
                         durationPlan === 'week'
-                          ? 'border-amber-600 bg-amber-50/80 dark:bg-amber-950/40'
+                          ? `${theme.border} ${theme.softBg}`
                           : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50'
                       }`}
                     >
                       <div className="font-bold text-slate-900 dark:text-white">
                         {lang === 'ar' ? 'لحد أسبوع (7 أيام)' : 'Up to 1 Week (7d)'}
                       </div>
-                      <div className="text-sm font-extrabold font-mono text-amber-700 dark:text-amber-400 mt-1">
+                      <div className={`text-sm font-extrabold font-mono ${theme.text} mt-1`}>
                         {adPricing.adPriceWeekEgp} {t.currency}
                       </div>
                     </button>
@@ -386,14 +460,14 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
                       onClick={() => setDurationPlan('month')}
                       className={`p-3 rounded-2xl border text-start transition-all cursor-pointer ${
                         durationPlan === 'month'
-                          ? 'border-amber-600 bg-amber-50/80 dark:bg-amber-950/40'
+                          ? `${theme.border} ${theme.softBg}`
                           : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50'
                       }`}
                     >
                       <div className="font-bold text-slate-900 dark:text-white">
                         {lang === 'ar' ? 'شهر كامل (30 يوم)' : 'Full Month (30d)'}
                       </div>
-                      <div className="text-sm font-extrabold font-mono text-amber-700 dark:text-amber-400 mt-1">
+                      <div className={`text-sm font-extrabold font-mono ${theme.text} mt-1`}>
                         {adPricing.adPriceMonthEgp} {t.currency}
                       </div>
                     </button>
@@ -410,13 +484,11 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
                       onChange={(e) => setCategory(e.target.value as any)}
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                     >
-                      {categories
-                        .filter((c) => c.id !== 'all')
-                        .map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c[lang]}
-                          </option>
-                        ))}
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c[lang]}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -466,13 +538,13 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
                   <span className="text-slate-600 dark:text-slate-300">
                     {lang === 'ar' ? 'تكلفة نشر الإعلان:' : 'Total Ad Cost:'}
                   </span>
-                  <span className="font-extrabold font-mono text-sm text-amber-700 dark:text-amber-400">
+                  <span className={`font-extrabold font-mono text-sm ${theme.text}`}>
                     {selectedAdCost} {t.currency} ({selectedDurationDays} {lang === 'ar' ? 'يوم' : 'days'})
                   </span>
                 </div>
 
                 {!isAdmin && (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  <p className={`text-[11px] ${theme.text}`}>
                     {lang === 'ar'
                       ? 'الإعلان هيتبعت للأدمن يراجعه الأول وبعدين ينزل ويبدأ العد التنازلي لمدة العرض، ويختفي تلقائياً لما المدة تخلص.'
                       : 'Your ad is reviewed by Admin first; display timer starts upon approval and expires automatically.'}
@@ -490,7 +562,7 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-5 py-2 font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl cursor-pointer"
+                    className={`px-5 py-2 font-bold text-white ${theme.solidBg} ${theme.hoverBg} rounded-xl cursor-pointer`}
                   >
                     {isSubmitting
                       ? lang === 'ar'
@@ -509,4 +581,3 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
     </div>
   );
 };
-

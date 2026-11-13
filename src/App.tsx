@@ -335,11 +335,11 @@ export default function App() {
           if (data.id && data.nameAr && data.nameEn) {
             remoteMap.set(data.id, {
               id: data.id,
-              nameAr: data.nameAr,
+              nameAr: data.nameAr.replace(/ىقباس/g, 'نقباس'),
               nameEn: data.nameEn,
               governorateAr: data.governorateAr || 'مصر',
               governorateEn: data.governorateEn || 'Egypt',
-              descriptionAr: data.descriptionAr || '',
+              descriptionAr: (data.descriptionAr || '').replace(/ىقباس/g, 'نقباس'),
               descriptionEn: data.descriptionEn || '',
               baseDeliveryFeeEgp: Number(data.baseDeliveryFeeEgp ?? 10),
               perKmFeeEgp: Number(data.perKmFeeEgp ?? 5),
@@ -1221,7 +1221,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col selection:bg-amber-500 selection:text-white transition-colors">
-      {/* Top Bar Header */}
+      {/* Top Bar Header with Relocated Search */}
       <VillageHeader
         lang={lang}
         onToggleLang={() => setLang(lang === 'ar' ? 'en' : 'ar')}
@@ -1232,6 +1232,8 @@ export default function App() {
           setActiveTab(tab);
           setSearchQuery('');
         }}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
         cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
         bookingsCount={bookings.length}
         onOpenCart={() => requireAuth(() => setIsCartModalOpen(true))}
@@ -1252,17 +1254,35 @@ export default function App() {
 
       {/* Main Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
-        {/* Hero Banner with Search & Exact 9 Category Shortcuts */}
+        {/* Hero Space Dedicated to Ads & Offers Showcase + All 10 Category Shortcuts */}
         <VillageHeroBanner
           lang={lang}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
           activeTab={activeTab}
           onSelectCategory={(cat) => {
             setActiveTab(cat);
             setSearchQuery('');
           }}
           activeVillage={activeVillage}
+          heroAdsSlot={
+            activeTab === 'all' ? (
+              <AdsSection
+                ads={allAds}
+                lang={lang}
+                activeVillageId={activeVillage.id}
+                activeVillageName={activeVillageName}
+                activeVillage={activeVillage}
+                currentUserId={firebaseUser?.uid || null}
+                currentUserName={userProfile?.displayName || firebaseUser?.displayName || (lang === 'ar' ? 'معلن من القرية' : 'Village Advertiser')}
+                defaultPhone={userProfile?.phone || ''}
+                isAdmin={isAdmin}
+                isBanned={isCurrentUserBanned}
+                adPricing={adPricing}
+                nowMs={nowMs}
+                canUseServices={canUsePlatformServices}
+                onRequireLogin={() => openAuthModal('login')}
+              />
+            ) : undefined
+          }
         />
 
         {/* Provider Account Status Notice (Pending / Rejected) */}
@@ -1358,24 +1378,7 @@ export default function App() {
           </div>
         )}
 
-        {/* SECTION ROUTING (10 Core Sections + Timed Classified Ads on Home - Free to browse, login required on action) */}
-        {activeTab === 'all' && (
-          <AdsSection
-            ads={allAds}
-            lang={lang}
-            activeVillageId={activeVillage.id}
-            activeVillageName={activeVillageName}
-            currentUserId={firebaseUser?.uid || null}
-            currentUserName={userProfile?.displayName || firebaseUser?.displayName || (lang === 'ar' ? 'معلن من القرية' : 'Village Advertiser')}
-            defaultPhone={userProfile?.phone || ''}
-            isAdmin={isAdmin}
-            isBanned={isCurrentUserBanned}
-            adPricing={adPricing}
-            nowMs={nowMs}
-            canUseServices={canUsePlatformServices}
-            onRequireLogin={() => openAuthModal('login')}
-          />
-        )}
+        {/* SECTION ROUTING (10 Core Sections - Free to browse, login required on action) */}
 
         {(activeTab === 'all' || activeTab === 'doctors') && (
           filteredDoctors.length > 0 ? (

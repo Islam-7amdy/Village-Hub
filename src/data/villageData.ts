@@ -443,11 +443,11 @@ export const DEFAULT_DISTRICTS: VillageDistrict[] = [
 export const DEFAULT_VILLAGES: VillageConfig[] = [
   {
     id: 'noqbas',
-    nameAr: 'قرية ىقباس',
+    nameAr: 'قرية نقباس',
     nameEn: 'Noqbas Village',
     governorateAr: 'مركز بنها - القليوبية',
     governorateEn: 'Banha - Qalyubia',
-    descriptionAr: 'دكاترة، صيدليات، مطاعم، صنايعية، بقالة، دروس وجمعيات خيرية لأهالي ىقباس',
+    descriptionAr: 'دكاترة، صيدليات، مطاعم، صنايعية، بقالة، دروس وجمعيات خيرية لأهالي نقباس',
     descriptionEn: 'Doctors, pharmacies, restaurants, craftsmen, grocery, tutoring & charity for Noqbas',
     baseDeliveryFeeEgp: 10,
     perKmFeeEgp: 5,
@@ -491,7 +491,7 @@ export const VILLAGE_DOCTORS: DoctorService[] = [
     villageId: 'noqbas',
     name: { ar: 'د. طارق الخطيب', en: 'Dr. Tariq Al-Khatib' },
     specialty: { ar: 'دكتور باطنة وطب أسرة - الوحدة الصحية', en: 'Internal Medicine & Family Doctor' },
-    clinicName: { ar: 'عيادة ىقباس المركزية', en: 'Noqbas Central Clinic' },
+    clinicName: { ar: 'عيادة نقباس المركزية', en: 'Noqbas Central Clinic' },
     phone: '01012345678',
     location: { ar: 'الشارع العمومي - جنب الوحدة المحلية', en: 'Main Street - Next to Village Hall' },
     rating: 4.9,
@@ -836,7 +836,7 @@ export const INITIAL_VILLAGE_ADS: VillageAd[] = [
     authorName: 'محل أولاد بركات للأجهزة',
     villageId: 'noqbas',
     title: 'عرض خاص على صيانة وتغيير شمعات فلاتر الميه (7 مراحل)',
-    description: 'تغيير طقم الشمعات الأصلي مع غسيل الخزان وقياس الأملاح مجاناً لبيوت ىقباس طول الأسبوع ده.',
+    description: 'تغيير طقم الشمعات الأصلي مع غسيل الخزان وقياس الأملاح مجاناً لبيوت نقباس طول الأسبوع ده.',
     category: 'offer',
     priceText: '220 ج.م بدل 300 ج.م',
     contactPhone: '01022334455',
@@ -1140,7 +1140,7 @@ export const VILLAGE_CHARITIES: CharityOrg[] = [
   {
     id: 'char-1',
     villageId: 'noqbas',
-    name: { ar: 'جمعية أهل الخير وتكافل ىقباس', en: 'Ahl El-Kheir Noqbas Charity' },
+    name: { ar: 'جمعية أهل الخير وتكافل نقباس', en: 'Ahl El-Kheir Noqbas Charity' },
     focus: { ar: 'كفالة الأيتام، شنط المواد الغذائية الشهرية، ودعم المرضى', en: 'Orphan sponsorship, monthly food boxes & medical aid' },
     activeCampaign: { ar: 'حملة تجهيز 150 شنطة غذائية وأغطية شتاء للأسر الأولى بالرعاية', en: 'Campaign: 150 Monthly Pantry Boxes & Winter Blankets' },
     address: { ar: 'بجوار المسجد الكبير - وسط البلد', en: 'Next to Grand Mosque - Center' },
@@ -1150,7 +1150,7 @@ export const VILLAGE_CHARITIES: CharityOrg[] = [
   {
     id: 'char-2',
     villageId: 'noqbas',
-    name: { ar: 'مؤسسة شباب ىقباس للتكافل والعلاج', en: 'Noqbas Youth Medical Aid Foundation' },
+    name: { ar: 'مؤسسة شباب نقباس للتكافل والعلاج', en: 'Noqbas Youth Medical Aid Foundation' },
     focus: { ar: 'قوافل طبية مجانية، شراء أدوية مزمنة، وتجهيز العرائس', en: 'Free medical convoys, chronic medication fund & marriage aid' },
     activeCampaign: { ar: 'صندوق الدواء الخيري لصرف علاج غير القادرين من صيدلية الشفاء', en: 'Charitable Medicine Fund at Al-Shifa Pharmacy' },
     address: { ar: 'الشارع العمومي - عمارة الوحدة المحلية', en: 'Main Street - Civic Building' },
@@ -1186,7 +1186,7 @@ export const VILLAGE_OTHER_SERVICES: OtherService[] = [
     name: { ar: 'مكتبة ومركز تصوير الرسالة', en: 'Al-Resala Print & Stationery' },
     activityType: { ar: 'طباعة، تصوير مستندات وأدوات مدرسية', en: 'Printing, Copying & School Supplies' },
     description: { ar: 'تصوير أبيض وألوان، طباعة أبحاث، تغليف حراري، وتجهيز ملفات التقديم', en: 'B&W/color printing, binding, laminating, and official paperwork prep' },
-    address: { ar: 'أمام المدرسة الإعدادية - ىقباس', en: 'In front of Prep School - Noqbas' },
+    address: { ar: 'أمام المدرسة الإعدادية - نقباس', en: 'In front of Prep School - Noqbas' },
     priceLabel: { ar: 'من 2 ج.م / ورقة', en: 'From 2 EGP / page' },
     hours: { ar: 'يومياً: 8 ص - 9 م', en: 'Daily: 8 AM - 9 PM' },
     phone: '01022113344'

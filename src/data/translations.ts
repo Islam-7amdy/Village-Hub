@@ -1,6 +1,6 @@
 export const TRANSLATIONS = {
   ar: {
-    appName: 'ىقباس',
+    appName: 'نقباس',
     appTagline: 'منصة القرية الموحدة — كل خدمات بلدك في حتة واحدة',
     switchLang: 'English',
     nightMode: 'الوضع الليلي',

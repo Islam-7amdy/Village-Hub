@@ -1073,7 +1073,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Body */}
         <div className="p-6 overflow-y-auto space-y-4 text-xs">
           {showUnauthOrFlowView ? (
-            <div className="space-y-4">
+            <div key="auth-flow-container" className="space-y-4">
               {/* Two Explicit Mode Tabs (Hidden while in Forgot Password flow) */}
               {forgotStep === 'none' && (
                 <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800">
@@ -1129,7 +1129,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               {forgotStep === 'phone' ? (
                 /* Forgot Password Step 1: Enter Phone -> Send SMS OTP */
-                <form onSubmit={handleSendForgotOtp} className="space-y-4">
+                <form key="forgot-phone-form" onSubmit={handleSendForgotOtp} className="space-y-4">
                   <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 leading-relaxed">
                     {lang === 'ar'
                       ? 'اكتب رقم الموبايل المسجل بيه حسابك عشان نبعتلك كود تأكيد في رسالة SMS وتعمل كلمة سر جديدة.'
@@ -1181,7 +1181,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </form>
               ) : forgotStep === 'otp' ? (
                 /* Forgot Password Step 2: Verify SMS OTP */
-                <form onSubmit={handleVerifyForgotOtp} className="space-y-4">
+                <form key="forgot-otp-form" onSubmit={handleVerifyForgotOtp} className="space-y-4">
                   <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1.5 text-center">
                     <MessageSquareCode className="w-7 h-7 text-emerald-600 mx-auto" />
                     <div className="font-bold text-emerald-950 dark:text-emerald-100">
@@ -1241,7 +1241,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </form>
               ) : forgotStep === 'new_password' ? (
                 /* Forgot Password Step 3: Set New Password */
-                <form onSubmit={handleSaveForgotPassword} className="space-y-3.5">
+                <form key="forgot-new-password-form" onSubmit={handleSaveForgotPassword} className="space-y-3.5">
                   <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 font-semibold flex items-center gap-2">
                     <KeyRound className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>
@@ -1308,7 +1308,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </form>
               ) : smsStep === 'otp' ? (
                 /* Register Step 2: SMS Verification Code Entry */
-                <form onSubmit={handleVerifyRegisterOtp} className="space-y-4">
+                <form key="register-otp-form" onSubmit={handleVerifyRegisterOtp} className="space-y-4">
                   <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1.5 text-center">
                     <MessageSquareCode className="w-7 h-7 text-emerald-600 mx-auto" />
                     <div className="font-bold text-emerald-950 dark:text-emerald-100">
@@ -1372,7 +1372,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </form>
               ) : authTab === 'login' ? (
                 /* Tab 1 Form: Sign In by Phone + Password (NO OTP) */
-                <form onSubmit={handlePasswordLogin} className="space-y-3.5">
+                <form key="login-password-form" onSubmit={handlePasswordLogin} className="space-y-3.5">
                   <div>
                     <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                       <Phone className="w-3.5 h-3.5 inline me-1 text-amber-600" />
@@ -1460,10 +1460,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </form>
               ) : (
                 /* Tab 2 Form: New User Registration (Name + Phone + Address + Password + SMS OTP) */
-                <form onSubmit={handleSendRegisterOtp} className="space-y-3">
+                <form key="register-form" onSubmit={handleSendRegisterOtp} className="space-y-3">
                   <div>
                     <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      {lang === 'ar' ? 'نوع الحساب إيه؟' : 'Account Type'}
+                      {lang === 'ar' ? 'نوع الحساب' : 'Account Type'}
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -1476,7 +1476,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         }`}
                       >
                         <UserCheck className="w-3.5 h-3.5" />
-                        <span>{lang === 'ar' ? 'مستخدم (أهالي البلد)' : 'Resident'}</span>
+                        <span>{lang === 'ar' ? 'مستخدم' : 'User'}</span>
                       </button>
                       <button
                         type="button"
@@ -1488,7 +1488,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         }`}
                       >
                         <Briefcase className="w-3.5 h-3.5" />
-                        <span>{lang === 'ar' ? 'مقدم خدمة / محل' : 'Service Provider'}</span>
+                        <span>{lang === 'ar' ? 'مقدم خدمة' : 'Service Provider'}</span>
                       </button>
                     </div>
                   </div>
@@ -1509,6 +1509,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
                     <div className="flex items-center gap-1.5">
                       <input
+                        key="register-avatar-file-input"
                         ref={fileInputRef}
                         type="file"
                         accept="image/*"
@@ -1727,7 +1728,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           ) : (
             /* Signed-in Account / Complete Registration Form */
-            <div className="space-y-4">
+            <div key="signed-in-profile-container" className="space-y-4">
               {isBanned && (
                 <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 flex items-start gap-3 text-rose-800 dark:text-rose-200">
                   <Ban className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
@@ -1856,6 +1857,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   <input
+                    key="profile-avatar-file-input"
                     ref={fileInputRef}
                     type="file"
                     accept="image/*"
@@ -1883,11 +1885,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              <form onSubmit={handleSaveAuthenticatedProfile} className="space-y-3.5">
+              <form key="authenticated-profile-form" onSubmit={handleSaveAuthenticatedProfile} className="space-y-3.5">
                 {!userProfile && (
                   <div>
                     <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      {lang === 'ar' ? 'نوع الحساب إيه؟' : 'Account Type'}
+                      {lang === 'ar' ? 'نوع الحساب' : 'Account Type'}
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -1899,7 +1901,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                         }`}
                       >
-                        {lang === 'ar' ? 'مستخدم (أهالي القرية)' : 'Village Resident'}
+                        {lang === 'ar' ? 'مستخدم' : 'User'}
                       </button>
                       <button
                         type="button"
@@ -1910,7 +1912,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                         }`}
                       >
-                        {lang === 'ar' ? 'مقدم خدمة (شغل/عيادة)' : 'Service Provider'}
+                        {lang === 'ar' ? 'مقدم خدمة' : 'Service Provider'}
                       </button>
                     </div>
                   </div>

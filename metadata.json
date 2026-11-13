@@ -1,6 +1,6 @@
 {
-  "name": "ىقباس | Noqbas - Village Services Hub",
-  "description": "منصة خدمات وأهالي قرية ىقباس الموحدة بالجنيه المصري: دكاترة، صنايعية، أكل بيتي، صيدلية بتوصيل حسب المسافة، إعلانات القرية، ونظام حسابات وإدارة قرى متعددة.",
+  "name": "نقباس | Noqbas - Village Services Hub",
+  "description": "منصة خدمات وأهالي قرية نقباس الموحدة: دكاترة، صنايعية، أكل بيتي، صيدلية بتوصيل حسب المسافة، إعلانات القرية، ونظام حسابات وإدارة قرى متعددة.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
