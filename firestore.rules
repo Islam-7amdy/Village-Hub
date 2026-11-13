@@ -1,0 +1,356 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core helper primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedEmail() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'hamzaislam1518@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Validation Helpers
+    function isValidVillage(data) {
+      return data.keys().hasAll(['id', 'nameAr', 'nameEn', 'baseDeliveryFeeEgp', 'perKmFeeEgp', 'isActive', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'nameAr', 'nameEn', 'governorateAr', 'governorateEn',
+          'descriptionAr', 'descriptionEn', 'baseDeliveryFeeEgp', 'perKmFeeEgp',
+          'colorCode', 'isActive', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 80 &&
+        data.nameEn is string && data.nameEn.size() >= 1 && data.nameEn.size() <= 80 &&
+        (!('governorateAr' in data) || (data.governorateAr is string && data.governorateAr.size() <= 80)) &&
+        (!('governorateEn' in data) || (data.governorateEn is string && data.governorateEn.size() <= 80)) &&
+        (!('descriptionAr' in data) || (data.descriptionAr is string && data.descriptionAr.size() <= 250)) &&
+        (!('descriptionEn' in data) || (data.descriptionEn is string && data.descriptionEn.size() <= 250)) &&
+        data.baseDeliveryFeeEgp is number && data.baseDeliveryFeeEgp >= 0 && data.baseDeliveryFeeEgp <= 500 &&
+        data.perKmFeeEgp is number && data.perKmFeeEgp >= 0 && data.perKmFeeEgp <= 200 &&
+        (!('colorCode' in data) || (data.colorCode in ['amber', 'emerald', 'blue', 'teal', 'rose', 'indigo'])) &&
+        data.isActive is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'villageId', 'providerStatus', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'phone', 'role', 'villageId', 'neighborhood',
+          'providerStatus', 'serviceCategory', 'serviceTitle', 'serviceFeeEgp', 'serviceBio',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 30)) &&
+        data.role in ['resident', 'provider'] &&
+        isValidId(data.villageId) &&
+        (!('neighborhood' in data) || (data.neighborhood is string && data.neighborhood.size() <= 100)) &&
+        data.providerStatus in ['none', 'pending', 'approved', 'rejected'] &&
+        (!('serviceCategory' in data) || (data.serviceCategory in ['none', 'doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'farm', 'ride'])) &&
+        (!('serviceTitle' in data) || (data.serviceTitle is string && data.serviceTitle.size() <= 100)) &&
+        (!('serviceFeeEgp' in data) || (data.serviceFeeEgp is string && data.serviceFeeEgp.size() <= 60)) &&
+        (!('serviceBio' in data) || (data.serviceBio is string && data.serviceBio.size() <= 400)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidProviderListing(data) {
+      return data.keys().hasAll(['ownerId', 'villageId', 'nameAr', 'nameEn', 'category', 'specialtyAr', 'specialtyEn', 'phone', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'ownerId', 'villageId', 'nameAr', 'nameEn', 'category', 'specialtyAr', 'specialtyEn',
+          'phone', 'neighborhoodAr', 'neighborhoodEn', 'priceLabelAr', 'priceLabelEn',
+          'bioAr', 'bioEn', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.villageId) &&
+        data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 80 &&
+        data.nameEn is string && data.nameEn.size() >= 1 && data.nameEn.size() <= 80 &&
+        data.category in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'farm', 'ride'] &&
+        data.specialtyAr is string && data.specialtyAr.size() >= 1 && data.specialtyAr.size() <= 120 &&
+        data.specialtyEn is string && data.specialtyEn.size() >= 1 && data.specialtyEn.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
+        (!('neighborhoodAr' in data) || (data.neighborhoodAr is string && data.neighborhoodAr.size() <= 100)) &&
+        (!('neighborhoodEn' in data) || (data.neighborhoodEn is string && data.neighborhoodEn.size() <= 100)) &&
+        (!('priceLabelAr' in data) || (data.priceLabelAr is string && data.priceLabelAr.size() <= 60)) &&
+        (!('priceLabelEn' in data) || (data.priceLabelEn is string && data.priceLabelEn.size() <= 60)) &&
+        (!('bioAr' in data) || (data.bioAr is string && data.bioAr.size() <= 400)) &&
+        (!('bioEn' in data) || (data.bioEn is string && data.bioEn.size() <= 400)) &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVillageAd(data) {
+      return data.keys().hasAll(['ownerId', 'authorName', 'villageId', 'title', 'description', 'category', 'contactPhone', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'ownerId', 'authorName', 'villageId', 'title', 'description', 'category',
+          'priceText', 'contactPhone', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.ownerId) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+        isValidId(data.villageId) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+        data.description is string && data.description.size() >= 4 && data.description.size() <= 500 &&
+        data.category in ['offer', 'shop', 'property', 'job', 'event'] &&
+        (!('priceText' in data) || (data.priceText is string && data.priceText.size() <= 60)) &&
+        data.contactPhone is string && data.contactPhone.size() >= 3 && data.contactPhone.size() <= 30 &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBooking(data) {
+      return data.keys().hasAll(['ownerId', 'villageId', 'serviceType', 'title', 'providerName', 'customerName', 'customerPhone', 'status', 'createdAt']) &&
+        data.keys().hasOnly([
+          'ownerId', 'villageId', 'serviceType', 'title', 'providerName', 'customerName',
+          'customerPhone', 'address', 'distanceKm', 'deliveryFeeEgp', 'totalAmountEgp',
+          'date', 'time', 'notes', 'status', 'createdAt'
+        ]) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.villageId) &&
+        data.serviceType in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'farm', 'ride'] &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.providerName is string && data.providerName.size() >= 1 && data.providerName.size() <= 100 &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 80 &&
+        data.customerPhone is string && data.customerPhone.size() >= 3 && data.customerPhone.size() <= 30 &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 160)) &&
+        (!('distanceKm' in data) || (data.distanceKm is number && data.distanceKm >= 0 && data.distanceKm <= 200)) &&
+        (!('deliveryFeeEgp' in data) || (data.deliveryFeeEgp is number && data.deliveryFeeEgp >= 0 && data.deliveryFeeEgp <= 5000)) &&
+        (!('totalAmountEgp' in data) || (data.totalAmountEgp is number && data.totalAmountEgp >= 0 && data.totalAmountEgp <= 100000)) &&
+        (!('date' in data) || (data.date is string && data.date.size() <= 40)) &&
+        (!('time' in data) || (data.time is string && data.time.size() <= 40)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        data.status in ['pending', 'confirmed', 'completed', 'cancelled'] &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['ownerId', 'targetId', 'villageId', 'author', 'rating', 'comment', 'date', 'isVerifiedResident', 'createdAt']) &&
+        data.keys().hasOnly([
+          'ownerId', 'targetId', 'villageId', 'author', 'neighborhood', 'rating',
+          'comment', 'date', 'isVerifiedResident', 'createdAt'
+        ]) &&
+        isValidId(data.ownerId) &&
+        data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+        isValidId(data.villageId) &&
+        data.author is string && data.author.size() >= 1 && data.author.size() <= 80 &&
+        (!('neighborhood' in data) || (data.neighborhood is string && data.neighborhood.size() <= 100)) &&
+        data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+        data.comment is string && data.comment.size() >= 2 && data.comment.size() <= 500 &&
+        data.date is string && data.date.size() >= 4 && data.date.size() <= 30 &&
+        data.isVerifiedResident is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAppSettings(data) {
+      return data.keys().hasAll(['activeVillageId', 'updatedAt']) &&
+        data.keys().hasOnly(['activeVillageId', 'updatedAt']) &&
+        isValidId(data.activeVillageId) &&
+        data.updatedAt is timestamp;
+    }
+
+    // Villages collection (public read, admin write)
+    match /villages/{villageId} {
+      allow get: if isValidId(villageId);
+      allow list: if true;
+      allow create: if isAdmin() && isValidId(villageId) && isValidVillage(incoming()) && incoming().createdAt == request.time;
+      allow update: if isAdmin() && isValidId(villageId) && isValidVillage(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(villageId);
+    }
+
+    // Global platform settings (public read, admin write)
+    match /appConfig/{docId} {
+      allow get: if isValidId(docId);
+      allow list: if true;
+      allow create, update: if isAdmin() && isValidId(docId) && isValidAppSettings(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    // Admin marker collection (admin-managed only)
+    match /admins/{adminUid} {
+      allow get: if isOwner(adminUid) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+
+    // Users collection (Strict PII protection, no self-elevation)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) &&
+        isOwner(userId) &&
+        isVerifiedEmail() &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (incoming().role == 'resident' && incoming().providerStatus == 'none') ||
+          (incoming().role == 'provider' && incoming().providerStatus == 'pending')
+        );
+      allow update: if isValidId(userId) &&
+        isVerifiedEmail() &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().role == existing().role &&
+            incoming().providerStatus == existing().providerStatus &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'phone', 'villageId', 'neighborhood',
+              'serviceCategory', 'serviceTitle', 'serviceFeeEgp', 'serviceBio', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // Public Service Providers Directory (Pending until Admin approves)
+    match /providers/{providerId} {
+      allow get: if isValidId(providerId) && (
+        existing().status == 'approved' ||
+        isOwner(existing().ownerId) ||
+        isAdmin()
+      );
+      allow list: if resource.data.status == 'approved' ||
+        (isSignedIn() && resource.data.ownerId == request.auth.uid) ||
+        isAdmin();
+      allow create: if isValidId(providerId) &&
+        isSignedIn() &&
+        isVerifiedEmail() &&
+        isValidProviderListing(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || incoming().status == 'pending');
+      allow update: if isValidId(providerId) &&
+        isVerifiedEmail() &&
+        isValidProviderListing(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(existing().ownerId) &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'villageId', 'nameAr', 'nameEn', 'category', 'specialtyAr', 'specialtyEn',
+              'phone', 'neighborhoodAr', 'neighborhoodEn', 'priceLabelAr', 'priceLabelEn',
+              'bioAr', 'bioEn', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(providerId) && (isAdmin() || isOwner(existing().ownerId));
+    }
+
+    // Village Classified Ads (Pending until Admin approves)
+    match /ads/{adId} {
+      allow get: if isValidId(adId) && (
+        existing().status == 'approved' ||
+        isOwner(existing().ownerId) ||
+        isAdmin()
+      );
+      allow list: if resource.data.status == 'approved' ||
+        (isSignedIn() && resource.data.ownerId == request.auth.uid) ||
+        isAdmin();
+      allow create: if isValidId(adId) &&
+        isSignedIn() &&
+        isVerifiedEmail() &&
+        isValidVillageAd(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || incoming().status == 'pending');
+      allow update: if isValidId(adId) &&
+        isVerifiedEmail() &&
+        isValidVillageAd(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(existing().ownerId) &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'description', 'category', 'priceText', 'contactPhone', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(adId) && (isAdmin() || isOwner(existing().ownerId));
+    }
+
+    // Bookings & Orders
+    match /bookings/{bookingId} {
+      allow get: if isValidId(bookingId) && (isOwner(existing().ownerId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(bookingId) &&
+        isSignedIn() &&
+        isVerifiedEmail() &&
+        isValidBooking(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(bookingId) &&
+        isVerifiedEmail() &&
+        isValidBooking(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        existing().status in ['pending', 'confirmed'] &&
+        (
+          isAdmin() ||
+          (isOwner(existing().ownerId) && incoming().diff(existing()).affectedKeys().hasOnly(['status']) && incoming().status == 'cancelled')
+        );
+      allow delete: if isAdmin() && isValidId(bookingId);
+    }
+
+    // Reviews & Star Ratings
+    match /reviews/{reviewId} {
+      allow get: if isValidId(reviewId);
+      allow list: if true;
+      allow create: if isValidId(reviewId) &&
+        isSignedIn() &&
+        isVerifiedEmail() &&
+        isValidReview(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(reviewId) && (isAdmin() || isOwner(existing().ownerId));
+    }
+  }
+}
