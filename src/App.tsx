@@ -252,13 +252,14 @@ export default function App() {
       firebaseUser &&
       profileLoaded &&
       !isAdmin &&
+      !isAuthModalOpen &&
       (!userProfile || !userProfile.phone) &&
       promptedPhoneForUid !== firebaseUser.uid
     ) {
       setPromptedPhoneForUid(firebaseUser.uid);
       openAuthModal('register');
     }
-  }, [firebaseUser, profileLoaded, isAdmin, userProfile, promptedPhoneForUid]);
+  }, [firebaseUser, profileLoaded, isAdmin, isAuthModalOpen, userProfile, promptedPhoneForUid]);
 
   // 2d. Per-User Isolated Cart Listener (Firestore /carts/{uid} + UID-scoped localStorage)
   const cartStorageKey = firebaseUser ? `noqbas_cart_${firebaseUser.uid}` : 'noqbas_cart_guest';

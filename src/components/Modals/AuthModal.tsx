@@ -4,6 +4,10 @@ import {
   RecaptchaVerifier,
   ConfirmationResult,
   signInWithPhoneNumber,
+  signInWithEmailAndPassword,
+  EmailAuthProvider,
+  linkWithCredential,
+  updatePassword,
   signInWithPopup,
   signOut
 } from 'firebase/auth';
@@ -22,6 +26,7 @@ import {
   VillageConfig,
   BannedPhoneRecord,
   normalizePhone,
+  phoneToAuthEmail,
   toE164Phone,
   isBanCurrentlyActive
 } from '../../data/villageData';
@@ -44,7 +49,11 @@ import {
   MessageSquareCode,
   UserPlus,
   ArrowRight,
-  Home
+  Home,
+  Lock,
+  Eye,
+  EyeOff,
+  KeyRound
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -126,18 +135,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const recaptchaDivRef = useRef<HTMLDivElement | null>(null);
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
 
-  // Explicit dual auth mode: 'login' (لديك حساب بالفعل) vs 'register' (مستخدم جديد)
+  // Dual Auth Tabs: 'login' (Phone + Password) vs 'register' (Details + Password + SMS OTP)
   const [authTab, setAuthTab] = useState<'login' | 'register'>(initialMode);
   const [smsStep, setSmsStep] = useState<'form' | 'otp'>('form');
+  const [forgotStep, setForgotStep] = useState<'none' | 'phone' | 'otp' | 'new_password'>('none');
+  const [isCompletingRegister, setIsCompletingRegister] = useState(false);
+
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
   const [otpCode, setOtpCode] = useState('');
   const [sentToDisplay, setSentToDisplay] = useState('');
 
-  // Profile / Registration fields (Name + Phone + Address, NO email)
+  // Login / Register / Reset Password Inputs
   const [role, setRole] = useState<'resident' | 'provider'>('resident');
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
+  // Optional Change Password inside Profile
+  const [showChangePwdBox, setShowChangePwdBox] = useState(false);
+  const [profileNewPwd, setProfileNewPwd] = useState('');
+  const [profileConfirmPwd, setProfileConfirmPwd] = useState('');
+
   const [photoUrl, setPhotoUrl] = useState('');
   const [villageId, setVillageId] = useState(activeVillageId);
   const [serviceCategory, setServiceCategory] = useState<ProviderCategory>('technician');
@@ -158,14 +183,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         }
         recaptchaRef.current = null;
       }
+      setForgotStep('none');
+      setIsCompletingRegister(false);
       return;
     }
 
     setAuthTab(initialMode);
     setSmsStep('form');
+    setForgotStep('none');
+    setIsCompletingRegister(false);
     setConfirmationResult(null);
     setOtpCode('');
     setSentToDisplay('');
+    setPassword('');
+    setConfirmPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setShowChangePwdBox(false);
+    setProfileNewPwd('');
+    setProfileConfirmPwd('');
     setError('');
     setSuccessMsg('');
   }, [isOpen, initialMode]);
@@ -211,14 +247,38 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const mapPhoneAuthError = (err: unknown): string => {
+  const mapAuthError = (err: unknown): string => {
     const code = (err as { code?: string })?.code || '';
     const msg = err instanceof Error ? err.message : String(err);
 
     if (code === 'auth/operation-not-allowed' || msg.includes('operation-not-allowed')) {
       return lang === 'ar'
-        ? 'خدمة التحقق برقم الهاتف (SMS) غير مفعلة حالياً في إعدادات Firebase Authentication. من فضلك فعّل Phone Sign-in من Firebase Console.'
-        : 'Phone SMS authentication is not enabled in Firebase Console yet (Authentication -> Sign-in method -> Phone -> Enable).';
+        ? 'خدمة تسجيل الدخول بكلمة السر أو التحقق بـ SMS غير مفعلة حالياً في إعدادات Firebase Authentication. فعّل كل من Phone و Email/Password من Firebase Console.'
+        : 'Phone or Email/Password sign-in is not enabled in Firebase Console yet (Authentication -> Sign-in method -> enable both Phone and Email/Password).';
+    }
+    if (
+      code === 'auth/invalid-credential' ||
+      code === 'auth/wrong-password' ||
+      code === 'auth/user-not-found'
+    ) {
+      return lang === 'ar'
+        ? 'رقم الموبايل أو كلمة السر مش صحيحة! تأكد من البيانات أو اضغط «نسيت كلمة المرور؟».'
+        : 'Incorrect mobile phone number or password. Please check or click Forgot Password.';
+    }
+    if (code === 'auth/weak-password') {
+      return lang === 'ar'
+        ? 'كلمة السر ضعيفة! لازم تكون 6 حروف أو أرقام على الأقل.'
+        : 'Password must be at least 6 characters long.';
+    }
+    if (code === 'auth/email-already-in-use' || code === 'auth/credential-already-in-use') {
+      return lang === 'ar'
+        ? 'رقم الموبايل ده مسجل بالفعل بحساب! جرب تسجيل الدخول أو اضغط «نسيت كلمة المرور؟».'
+        : 'This phone number already has a registered password account. Please sign in or reset your password.';
+    }
+    if (code === 'auth/requires-recent-login') {
+      return lang === 'ar'
+        ? 'محتاج تأكيد حديث للهاتف! سجل خروج واستخدم «نسيت كلمة المرور؟» لإعادة تعيين كلمة السر برسالة SMS.'
+        : 'Recent verification required. Sign out and use Forgot Password via SMS OTP.';
     }
     if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
       return lang === 'ar'
@@ -242,8 +302,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
     if (code === 'auth/too-many-requests') {
       return lang === 'ar'
-        ? 'تم إرسال محاولات كثيرة متتالية، استنى شوية وجرب تاني.'
-        : 'Too many SMS attempts. Please wait a few minutes and try again.';
+        ? 'محاولات كتير ورا بعض، استنى شوية وجرب تاني.'
+        : 'Too many attempts. Please wait a few minutes and try again.';
     }
     if (code === 'auth/billing-not-enabled') {
       return lang === 'ar'
@@ -251,8 +311,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         : 'Real SMS delivery requires Blaze plan or a configured Test Phone Number in Firebase Console -> Authentication -> Sign-in method -> Phone.';
     }
     return lang === 'ar'
-      ? `تعذر إرسال أو تأكيد الرسالة النصية (${code || msg}).`
-      : `Could not complete SMS verification (${code || msg}).`;
+      ? `حصل خطأ (${code || msg}).`
+      : `Authentication error (${code || msg}).`;
   };
 
   const getOrCreateRecaptcha = () => {
@@ -397,8 +457,88 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Step 1 of Phone Auth (Login or New Registration): Send SMS OTP
-  const handleSendSmsOtp = async (e: React.FormEvent) => {
+  // =========================================================================
+  // FLOW 1: Login with Phone + Password (NO OTP)
+  // =========================================================================
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMsg('');
+
+    const normalized = normalizePhone(phone.trim());
+    if (normalized.length < 10) {
+      setError(
+        lang === 'ar'
+          ? 'اكتب رقم موبايل صحيح (مثلاً 01012345678).'
+          : 'Please enter a valid mobile number (e.g. 01012345678).'
+      );
+      return;
+    }
+    if (password.length < 6) {
+      setError(
+        lang === 'ar'
+          ? 'اكتب كلمة السر (6 حروف أو أرقام على الأقل).'
+          : 'Please enter your password (at least 6 characters).'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const authEmail = phoneToAuthEmail(normalized);
+      const cred = await signInWithEmailAndPassword(auth, authEmail, password);
+      const signedInUser = cred.user;
+
+      // Check phone ban
+      const banMessage = await checkBanForPhone(normalized);
+      if (banMessage) {
+        setError(banMessage);
+        await signOut(auth);
+        setIsLoading(false);
+        return;
+      }
+
+      const existingSnap = await getDoc(doc(db, 'users', signedInUser.uid));
+      if (existingSnap.exists()) {
+        const existingProfile = existingSnap.data() as UserProfile;
+        if (isBanCurrentlyActive(existingProfile.isBanned, existingProfile.banUntilMs, false)) {
+          setError(
+            lang === 'ar'
+              ? 'حسابك محظور حالياً من استخدام المنصة.'
+              : 'Your account is currently banned.'
+          );
+          await signOut(auth);
+          setIsLoading(false);
+          return;
+        }
+        setSuccessMsg(
+          lang === 'ar'
+            ? `أهلاً بيك يا ${existingProfile.displayName}! تم تسجيل الدخول بنجاح.`
+            : `Welcome back, ${existingProfile.displayName}!`
+        );
+      } else {
+        setSuccessMsg(
+          lang === 'ar' ? 'تم تسجيل الدخول بنجاح!' : 'Signed in successfully!'
+        );
+      }
+
+      onProfileSaved();
+      setTimeout(() => {
+        setSuccessMsg('');
+        onClose();
+      }, 950);
+    } catch (err) {
+      console.error('Phone+Password login error:', err);
+      setError(mapAuthError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // =========================================================================
+  // FLOW 2: New Registration (Step 1: Send SMS OTP, Step 2: Verify + Link Password)
+  // =========================================================================
+  const handleSendRegisterOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccessMsg('');
@@ -414,24 +554,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       );
       return;
     }
-
-    if (authTab === 'register') {
-      if (!displayName.trim()) {
-        setError(lang === 'ar' ? 'اكتب اسمك بالكامل الأول.' : 'Please enter your full name.');
-        return;
-      }
-      if (!address.trim()) {
-        setError(
-          lang === 'ar'
-            ? 'اكتب عنوانك بالتفصيل (الناحية والشارع أو علامة مميزة).'
-            : 'Please enter your full address in the village.'
-        );
-        return;
-      }
-      if (role === 'provider' && !serviceTitle.trim()) {
-        setError(lang === 'ar' ? 'اكتب تخصصك أو اسم المحل / العيادة.' : 'Please enter your service specialty.');
-        return;
-      }
+    if (!displayName.trim()) {
+      setError(lang === 'ar' ? 'اكتب اسمك بالكامل الأول.' : 'Please enter your full name.');
+      return;
+    }
+    if (!address.trim()) {
+      setError(
+        lang === 'ar'
+          ? 'اكتب عنوانك بالتفصيل (الناحية والشارع أو علامة مميزة).'
+          : 'Please enter your full address in the village.'
+      );
+      return;
+    }
+    if (password.length < 6) {
+      setError(
+        lang === 'ar'
+          ? 'اختار كلمة سر قوية (6 حروف أو أرقام على الأقل).'
+          : 'Password must be at least 6 characters.'
+      );
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError(
+        lang === 'ar'
+          ? 'كلمتا السر مش متطابقتين! تأكد منهم.'
+          : 'Passwords do not match.'
+      );
+      return;
+    }
+    if (role === 'provider' && !serviceTitle.trim()) {
+      setError(lang === 'ar' ? 'اكتب تخصصك أو اسم المحل / العيادة.' : 'Please enter your service specialty.');
+      return;
     }
 
     setIsLoading(true);
@@ -443,15 +596,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setSmsStep('otp');
       setOtpCode('');
     } catch (err) {
-      console.error('Phone SMS send error:', err);
-      setError(mapPhoneAuthError(err));
+      console.error('Register SMS send error:', err);
+      setError(mapAuthError(err));
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Step 2 of Phone Auth: Verify 6-digit SMS Code
-  const handleVerifySmsOtp = async (e: React.FormEvent) => {
+  const handleVerifyRegisterOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!confirmationResult) return;
 
@@ -467,82 +619,280 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setError('');
     setIsLoading(true);
+    setIsCompletingRegister(true);
     try {
       const credential = await confirmationResult.confirm(cleanCode);
       const signedInUser = credential.user;
       const normalized = normalizePhone(signedInUser.phoneNumber || phone.trim());
 
-      // Check phone ban now that user is authenticated
+      // 1. Check ban status
       const banMessage = await checkBanForPhone(normalized);
       if (banMessage) {
         setError(banMessage);
         await signOut(auth);
+        setIsCompletingRegister(false);
         setSmsStep('form');
         setConfirmationResult(null);
         setIsLoading(false);
         return;
       }
 
+      // 2. Check if already registered
       const existingSnap = await getDoc(doc(db, 'users', signedInUser.uid));
-
-      if (authTab === 'login') {
-        if (existingSnap.exists()) {
-          const existingProfile = existingSnap.data() as UserProfile;
-          if (isBanCurrentlyActive(existingProfile.isBanned, existingProfile.banUntilMs, false)) {
-            setError(
-              lang === 'ar'
-                ? 'حسابك محظور حالياً من استخدام المنصة.'
-                : 'Your account is currently banned.'
-            );
-            await signOut(auth);
-            setIsLoading(false);
-            return;
-          }
-          setSuccessMsg(
-            lang === 'ar'
-              ? `أهلاً بيك يا ${existingProfile.displayName}! تم تسجيل الدخول بنجاح.`
-              : `Welcome back, ${existingProfile.displayName}!`
-          );
-          onProfileSaved();
-          setTimeout(() => {
-            setSuccessMsg('');
-            onClose();
-          }, 1100);
-          return;
-        } else {
-          // Phone verified, but no profile yet -> let user fill Name & Address right now!
-          setPhone(normalized);
-          setAuthTab('register');
-          setSmsStep('form');
-          setError(
-            lang === 'ar'
-              ? 'تم تأكيد رقم موبايلك! بس لسه مفيش بيانات مسجلة بالرقم ده — اكتب اسمك وعنوانك عشان تفعّل حسابك.'
-              : 'Phone verified! No profile found yet — enter your name and address to activate your account.'
-          );
-          return;
-        }
+      if (existingSnap.exists()) {
+        await signOut(auth);
+        setIsCompletingRegister(false);
+        setAuthTab('login');
+        setSmsStep('form');
+        setConfirmationResult(null);
+        setOtpCode('');
+        setPassword('');
+        setConfirmPassword('');
+        setError(
+          lang === 'ar'
+            ? 'رقم الموبايل ده مسجل بالفعل! سجل دخولك برقم الهاتف وكلمة السر، أو اضغط «نسيت كلمة المرور؟» لو نسيتها.'
+            : 'This phone number is already registered! Sign in with Phone & Password, or use Forgot Password.'
+        );
+        setIsLoading(false);
+        return;
       }
 
-      // Registration flow: Save profile immediately (or keep existing if already created)
-      await writeUserAndProviderDocs(signedInUser.uid, normalized, !existingSnap.exists());
+      // 3. Link password credential so future logins use Phone + Password without OTP
+      const authEmail = phoneToAuthEmail(normalized);
+      const hasPasswordProvider = signedInUser.providerData.some(
+        (p) => p.providerId === 'password'
+      );
+      if (hasPasswordProvider) {
+        await updatePassword(signedInUser, password);
+      } else {
+        await linkWithCredential(
+          signedInUser,
+          EmailAuthProvider.credential(authEmail, password)
+        );
+      }
+
+      // 4. Save user & optional provider doc
+      await writeUserAndProviderDocs(signedInUser.uid, normalized, true);
 
       setSuccessMsg(
-        role === 'provider' && !existingSnap.exists()
+        role === 'provider'
           ? lang === 'ar'
             ? 'تم تأكيد الموبايل وتسجيل طلبك كمقدم خدمة! مستني موافقة الأدمن.'
             : 'Phone verified & provider application submitted for admin approval!'
           : lang === 'ar'
-          ? 'تم تأكيد رقم الهاتف وإنشاء حسابك بنجاح! أهلاً بيك في المنصة.'
+          ? 'تم تأكيد رقم الهاتف وإنشاء حسابك بنجاح! تقدر تدخل برقمك وكلمة السر في أي وقت.'
           : 'Phone verified & account created successfully!'
       );
       onProfileSaved();
       setTimeout(() => {
         setSuccessMsg('');
+        setIsCompletingRegister(false);
         onClose();
       }, 1300);
     } catch (err) {
-      console.error('OTP verify error:', err);
-      setError(mapPhoneAuthError(err));
+      console.error('Register OTP verify error:', err);
+      setIsCompletingRegister(false);
+      setError(mapAuthError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // =========================================================================
+  // FLOW 3: Forgot Password (SMS OTP -> Set New Password)
+  // =========================================================================
+  const handleSendForgotOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMsg('');
+
+    const normalized = normalizePhone(phone.trim());
+    const e164 = toE164Phone(phone.trim());
+    if (normalized.length < 10 || !e164.startsWith('+') || e164.length < 11) {
+      setError(
+        lang === 'ar'
+          ? 'اكتب رقم الموبايل المسجل بشكل صحيح (مثلاً 01012345678).'
+          : 'Please enter a valid registered mobile number.'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const verifier = getOrCreateRecaptcha();
+      const result = await signInWithPhoneNumber(auth, e164, verifier);
+      setConfirmationResult(result);
+      setSentToDisplay(e164);
+      setForgotStep('otp');
+      setOtpCode('');
+    } catch (err) {
+      console.error('Forgot password SMS error:', err);
+      setError(mapAuthError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyForgotOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!confirmationResult) return;
+
+    const cleanCode = otpCode.trim();
+    if (cleanCode.length < 4) {
+      setError(
+        lang === 'ar'
+          ? 'اكتب كود التأكيد المكون من 6 أرقام.'
+          : 'Please enter the 6-digit SMS verification code.'
+      );
+      return;
+    }
+
+    setError('');
+    setIsLoading(true);
+    try {
+      const credential = await confirmationResult.confirm(cleanCode);
+      const signedInUser = credential.user;
+      const normalized = normalizePhone(signedInUser.phoneNumber || phone.trim());
+
+      const banMessage = await checkBanForPhone(normalized);
+      if (banMessage) {
+        setError(banMessage);
+        await signOut(auth);
+        setForgotStep('phone');
+        setConfirmationResult(null);
+        setIsLoading(false);
+        return;
+      }
+
+      const existingSnap = await getDoc(doc(db, 'users', signedInUser.uid));
+      if (!existingSnap.exists()) {
+        await signOut(auth);
+        setForgotStep('none');
+        setAuthTab('register');
+        setSmsStep('form');
+        setError(
+          lang === 'ar'
+            ? 'الرقم ده مش متسجل قبل كده! اعمل حساب جديد من هنا.'
+            : 'No account found for this phone number yet. Please create a new account.'
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setForgotStep('new_password');
+    } catch (err) {
+      console.error('Forgot password OTP verify error:', err);
+      setError(mapAuthError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSaveForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMsg('');
+
+    if (newPassword.length < 6) {
+      setError(
+        lang === 'ar'
+          ? 'كلمة السر الجديدة لازم تكون 6 حروف أو أرقام على الأقل.'
+          : 'New password must be at least 6 characters.'
+      );
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError(
+        lang === 'ar'
+          ? 'كلمتا السر الجداد مش متطابقتين!'
+          : 'Passwords do not match.'
+      );
+      return;
+    }
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      setError(lang === 'ar' ? 'انتهت جلسة التحقق، جرب إرسال الكود تاني.' : 'Verification session expired.');
+      setForgotStep('phone');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const normalized = normalizePhone(currentUser.phoneNumber || phone.trim());
+      const authEmail = phoneToAuthEmail(normalized);
+      const hasPasswordProvider = currentUser.providerData.some(
+        (p) => p.providerId === 'password'
+      );
+
+      if (hasPasswordProvider) {
+        await updatePassword(currentUser, newPassword);
+      } else {
+        await linkWithCredential(
+          currentUser,
+          EmailAuthProvider.credential(authEmail, newPassword)
+        );
+      }
+
+      setSuccessMsg(
+        lang === 'ar'
+          ? 'تم تغيير كلمة السر بنجاح! تقدر تسجل دخولك بيها بعد كده مباشرة.'
+          : 'Password updated successfully! You can now sign in with your phone & new password.'
+      );
+      onProfileSaved();
+      setTimeout(() => {
+        setSuccessMsg('');
+        setForgotStep('none');
+        onClose();
+      }, 1300);
+    } catch (err) {
+      console.error('Set new password error:', err);
+      setError(mapAuthError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Change Password inside Signed-in Profile View
+  const handleProfileChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firebaseUser) return;
+    setError('');
+    setSuccessMsg('');
+
+    if (profileNewPwd.length < 6) {
+      setError(
+        lang === 'ar'
+          ? 'كلمة السر الجديدة لازم تكون 6 حروف أو أرقام على الأقل.'
+          : 'Password must be at least 6 characters.'
+      );
+      return;
+    }
+    if (profileNewPwd !== profileConfirmPwd) {
+      setError(lang === 'ar' ? 'كلمتا السر مش متطابقتين.' : 'Passwords do not match.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const normalized = normalizePhone(userProfile?.phone || firebaseUser.phoneNumber || phone.trim());
+      const hasPasswordProvider = firebaseUser.providerData.some((p) => p.providerId === 'password');
+      if (hasPasswordProvider) {
+        await updatePassword(firebaseUser, profileNewPwd);
+      } else {
+        await linkWithCredential(
+          firebaseUser,
+          EmailAuthProvider.credential(phoneToAuthEmail(normalized), profileNewPwd)
+        );
+      }
+      setShowChangePwdBox(false);
+      setProfileNewPwd('');
+      setProfileConfirmPwd('');
+      setSuccessMsg(lang === 'ar' ? 'تم تحديث كلمة السر بنجاح ✓' : 'Password updated successfully ✓');
+    } catch (err) {
+      setError(mapAuthError(err));
     } finally {
       setIsLoading(false);
     }
@@ -666,6 +1016,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   ];
 
   const displayAvatar = photoUrl || '';
+  const showUnauthOrFlowView = !firebaseUser || forgotStep !== 'none' || isCompletingRegister;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs">
@@ -677,7 +1028,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              {!firebaseUser
+              {forgotStep !== 'none'
+                ? lang === 'ar'
+                  ? 'استعادة كلمة المرور'
+                  : 'Reset Password'
+                : showUnauthOrFlowView
                 ? authTab === 'login'
                   ? lang === 'ar'
                     ? 'تسجيل الدخول (لديك حساب بالفعل)'
@@ -692,11 +1047,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 : t.account}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {!firebaseUser
+              {forgotStep !== 'none'
                 ? lang === 'ar'
-                  ? 'التسجيل بالاسم ورقم الهاتف والعنوان — مع تأكيد الهاتف برسالة SMS'
-                  : 'Register with Name, Phone & Address — verified via SMS code'
-                : userProfile?.phone || firebaseUser.phoneNumber || firebaseUser.email}
+                  ? 'تأكيد رقم الموبايل برسالة SMS لتعيين كلمة سر جديدة'
+                  : 'Verify mobile phone via SMS OTP to set a new password'
+                : showUnauthOrFlowView
+                ? authTab === 'login'
+                  ? lang === 'ar'
+                    ? 'ادخل برقم الموبايل وكلمة السر مباشرة'
+                    : 'Sign in with your mobile phone & password'
+                  : lang === 'ar'
+                  ? 'التسجيل بالاسم ورقم الهاتف والعنوان وكلمة السر — مع تأكيد الهاتف برسالة SMS'
+                  : 'Register with Name, Phone, Address & Password — verified via SMS OTP'
+                : userProfile?.phone || firebaseUser?.phoneNumber || firebaseUser?.email}
             </p>
           </div>
           <button
@@ -709,46 +1072,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Body */}
         <div className="p-6 overflow-y-auto space-y-4 text-xs">
-          {!firebaseUser ? (
+          {showUnauthOrFlowView ? (
             <div className="space-y-4">
-              {/* Two Explicit Mode Tabs: Existing Account vs New User */}
-              <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthTab('login');
-                    setSmsStep('form');
-                    setError('');
-                    setSuccessMsg('');
-                  }}
-                  className={`py-2.5 px-3 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    authTab === 'login'
-                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                  }`}
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>{lang === 'ar' ? 'لديك حساب بالفعل' : 'Have an Account'}</span>
-                </button>
+              {/* Two Explicit Mode Tabs (Hidden while in Forgot Password flow) */}
+              {forgotStep === 'none' && (
+                <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthTab('login');
+                      setSmsStep('form');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className={`py-2.5 px-3 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      authTab === 'login'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>{lang === 'ar' ? 'لديك حساب بالفعل' : 'Have an Account'}</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthTab('register');
-                    setSmsStep('form');
-                    setError('');
-                    setSuccessMsg('');
-                  }}
-                  className={`py-2.5 px-3 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    authTab === 'register'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                  }`}
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>{lang === 'ar' ? 'مستخدم جديد (تسجيل)' : 'New User (Register)'}</span>
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthTab('register');
+                      setSmsStep('form');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className={`py-2.5 px-3 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      authTab === 'register'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>{lang === 'ar' ? 'مستخدم جديد (تسجيل)' : 'New User (Register)'}</span>
+                  </button>
+                </div>
+              )}
 
               {error && (
                 <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 leading-relaxed">
@@ -762,9 +1127,188 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               )}
 
-              {smsStep === 'otp' ? (
-                /* Step 2: SMS Verification Code Entry */
-                <form onSubmit={handleVerifySmsOtp} className="space-y-4">
+              {forgotStep === 'phone' ? (
+                /* Forgot Password Step 1: Enter Phone -> Send SMS OTP */
+                <form onSubmit={handleSendForgotOtp} className="space-y-4">
+                  <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'اكتب رقم الموبايل المسجل بيه حسابك عشان نبعتلك كود تأكيد في رسالة SMS وتعمل كلمة سر جديدة.'
+                      : 'Enter your registered mobile phone number to receive an SMS code and reset your password.'}
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      <Phone className="w-3.5 h-3.5 inline me-1 text-amber-600" />
+                      {t.phone} *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="01012345678"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotStep('none');
+                        setError('');
+                      }}
+                      className="px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>{lang === 'ar' ? 'رجوع' : 'Back'}</span>
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <MessageSquareCode className="w-4 h-4" />
+                      <span>
+                        {isLoading
+                          ? lang === 'ar'
+                            ? 'جاري الإرسال...'
+                            : 'Sending SMS...'
+                          : t.sendSmsCode}
+                      </span>
+                    </button>
+                  </div>
+                </form>
+              ) : forgotStep === 'otp' ? (
+                /* Forgot Password Step 2: Verify SMS OTP */
+                <form onSubmit={handleVerifyForgotOtp} className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1.5 text-center">
+                    <MessageSquareCode className="w-7 h-7 text-emerald-600 mx-auto" />
+                    <div className="font-bold text-emerald-950 dark:text-emerald-100">
+                      {lang === 'ar' ? 'تم إرسال رسالة التأكيد!' : 'SMS Verification Code Sent!'}
+                    </div>
+                    <p className="text-[11px] text-emerald-800 dark:text-emerald-300">
+                      {lang === 'ar'
+                        ? `اكتب الـ 6 أرقام اللي وصلوك في رسالة على (${sentToDisplay}):`
+                        : `Enter the 6-digit code sent via SMS to ${sentToDisplay}:`}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      {t.smsOtpLabel} *
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoFocus
+                      maxLength={6}
+                      required
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="123456"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-center text-lg font-mono tracking-[0.4em] focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotStep('phone');
+                        setOtpCode('');
+                        setError('');
+                      }}
+                      className="px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>{lang === 'ar' ? 'تعديل الرقم' : 'Change Phone'}</span>
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs cursor-pointer"
+                    >
+                      {isLoading
+                        ? lang === 'ar'
+                          ? 'جاري التأكيد...'
+                          : 'Verifying...'
+                        : lang === 'ar'
+                        ? 'تأكيد الكود'
+                        : 'Verify Code'}
+                    </button>
+                  </div>
+                </form>
+              ) : forgotStep === 'new_password' ? (
+                /* Forgot Password Step 3: Set New Password */
+                <form onSubmit={handleSaveForgotPassword} className="space-y-3.5">
+                  <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 font-semibold flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      {lang === 'ar'
+                        ? 'تم تأكيد رقم الهاتف! اكتب كلمة السر الجديدة لحسابك:'
+                        : 'Phone verified! Enter a new password for your account:'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      <Lock className="w-3.5 h-3.5 inline me-1 text-amber-600" />
+                      {lang === 'ar' ? 'كلمة السر الجديدة *' : 'New Password *'}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder={lang === 'ar' ? '6 حروف أو أرقام على الأقل' : 'Min 6 characters'}
+                        className="w-full ps-3.5 pe-10 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((v) => !v)}
+                        className="absolute inset-y-0 end-2.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      <Lock className="w-3.5 h-3.5 inline me-1 text-amber-600" />
+                      {lang === 'ar' ? 'تأكيد كلمة السر الجديدة *' : 'Confirm New Password *'}
+                    </label>
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder={lang === 'ar' ? 'اكتب كلمة السر الجديدة تاني' : 'Re-enter new password'}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm cursor-pointer"
+                  >
+                    {isLoading
+                      ? lang === 'ar'
+                        ? 'جاري الحفظ...'
+                        : 'Saving...'
+                      : lang === 'ar'
+                      ? 'حفظ كلمة السر الجديدة والدخول'
+                      : 'Save New Password & Sign In'}
+                  </button>
+                </form>
+              ) : smsStep === 'otp' ? (
+                /* Register Step 2: SMS Verification Code Entry */
+                <form onSubmit={handleVerifyRegisterOtp} className="space-y-4">
                   <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1.5 text-center">
                     <MessageSquareCode className="w-7 h-7 text-emerald-600 mx-auto" />
                     <div className="font-bold text-emerald-950 dark:text-emerald-100">
@@ -774,7 +1318,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
                     <p className="text-[11px] text-emerald-800 dark:text-emerald-300">
                       {lang === 'ar'
-                        ? `شوف الرسايل على رقم الموبايل (${sentToDisplay}) واكتب كود التأكيد لتفعيل الدخول:`
+                        ? `شوف الرسايل على رقم الموبايل (${sentToDisplay}) واكتب كود التأكيد لتفعيل الحساب:`
                         : `Enter the 6-digit code sent via SMS to ${sentToDisplay}:`}
                     </p>
                   </div>
@@ -799,6 +1343,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div className="flex items-center justify-between gap-3">
                     <button
                       type="button"
+                      disabled={isLoading}
                       onClick={() => {
                         setSmsStep('form');
                         setOtpCode('');
@@ -807,7 +1352,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       className="px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       <ArrowRight className="w-3.5 h-3.5" />
-                      <span>{lang === 'ar' ? 'تعديل الرقم' : 'Change Number'}</span>
+                      <span>{lang === 'ar' ? 'تعديل البيانات' : 'Edit Info'}</span>
                     </button>
 
                     <button
@@ -817,25 +1362,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     >
                       {isLoading
                         ? lang === 'ar'
-                          ? 'جاري التحقق...'
-                          : 'Verifying...'
-                        : authTab === 'register'
-                        ? lang === 'ar'
-                          ? 'تأكيد الهاتف وإنشاء الحساب'
-                          : 'Verify & Create Account'
-                        : t.verifySmsCode}
+                          ? 'جاري التأكيد وإنشاء الحساب...'
+                          : 'Creating Account...'
+                        : lang === 'ar'
+                        ? 'تأكيد الهاتف وإنشاء الحساب'
+                        : 'Verify & Create Account'}
                     </button>
                   </div>
                 </form>
               ) : authTab === 'login' ? (
-                /* Tab 1 Form: Existing Account Sign-In by Phone */
-                <form onSubmit={handleSendSmsOtp} className="space-y-4">
-                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 leading-relaxed">
-                    {lang === 'ar'
-                      ? 'اكتب رقم موبايلك المسجل عشان نبعتلك كود دخول في رسالة نصية SMS وتفتح خدمات القرية.'
-                      : 'Enter your registered mobile phone number to receive an SMS login code.'}
-                  </div>
-
+                /* Tab 1 Form: Sign In by Phone + Password (NO OTP) */
+                <form onSubmit={handlePasswordLogin} className="space-y-3.5">
                   <div>
                     <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                       <Phone className="w-3.5 h-3.5 inline me-1 text-amber-600" />
@@ -851,18 +1388,58 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     />
                   </div>
 
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="font-semibold text-slate-700 dark:text-slate-300">
+                        <Lock className="w-3.5 h-3.5 inline me-1 text-amber-600" />
+                        {lang === 'ar' ? 'كلمة السر *' : 'Password *'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotStep('phone');
+                          setError('');
+                          setSuccessMsg('');
+                        }}
+                        className="text-[11px] font-bold text-amber-700 dark:text-amber-400 hover:underline cursor-pointer"
+                      >
+                        {lang === 'ar' ? 'نسيت كلمة المرور؟' : 'Forgot password?'}
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder={lang === 'ar' ? 'اكتب كلمة السر' : 'Enter password'}
+                        className="w-full ps-3.5 pe-10 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="absolute inset-y-0 end-2.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
                   <button
                     type="submit"
                     disabled={isLoading}
                     className="w-full py-3 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 font-bold flex items-center justify-center gap-2 cursor-pointer shadow-sm"
                   >
-                    <MessageSquareCode className="w-4 h-4" />
+                    <LogIn className="w-4 h-4" />
                     <span>
                       {isLoading
                         ? lang === 'ar'
-                          ? 'جاري إرسال الرسالة...'
-                          : 'Sending SMS...'
-                        : t.sendSmsCode}
+                          ? 'جاري تسجيل الدخول...'
+                          : 'Signing in...'
+                        : lang === 'ar'
+                        ? 'تسجيل الدخول'
+                        : 'Sign In'}
                     </span>
                   </button>
 
@@ -882,8 +1459,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </div>
                 </form>
               ) : (
-                /* Tab 2 Form: New User Registration (Name + Phone + Address + SMS Verification, NO Email) */
-                <form onSubmit={handleSendSmsOtp} className="space-y-3.5">
+                /* Tab 2 Form: New User Registration (Name + Phone + Address + Password + SMS OTP) */
+                <form onSubmit={handleSendRegisterOtp} className="space-y-3">
                   <div>
                     <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                       {lang === 'ar' ? 'نوع الحساب إيه؟' : 'Account Type'}
@@ -917,9 +1494,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </div>
 
                   {/* Optional Avatar */}
-                  <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 flex items-center justify-between gap-3">
+                  <div className="p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                      <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
                         {displayAvatar ? (
                           <img src={displayAvatar} alt="Avatar" className="w-full h-full object-cover" />
                         ) : (
@@ -957,7 +1534,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
                       <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                         {t.name} *
@@ -975,7 +1552,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <div>
                       <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                         <Phone className="w-3 h-3 inline me-1" />
-                        {lang === 'ar' ? 'رقم الهاتف (لتأكيد SMS) *' : 'Mobile Phone (SMS Verified) *'}
+                        {lang === 'ar' ? 'رقم الهاتف (تأكيد SMS) *' : 'Mobile Phone (SMS) *'}
                       </label>
                       <input
                         type="tel"
@@ -988,7 +1565,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
                       <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                         <MapPin className="w-3 h-3 inline me-1" />
@@ -1018,6 +1595,49 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         value={address}
                         onChange={(e) => setAddress(e.target.value)}
                         placeholder={lang === 'ar' ? 'الناحية / الشارع / علامة مميزة' : 'Quarter / Street / Landmark'}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        <Lock className="w-3 h-3 inline me-1" />
+                        {lang === 'ar' ? 'كلمة السر *' : 'Password *'}
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          minLength={6}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder={lang === 'ar' ? '6 أحرف/أرقام على الأقل' : 'Min 6 characters'}
+                          className="w-full ps-3 pe-9 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="absolute inset-y-0 end-2.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        <Lock className="w-3 h-3 inline me-1" />
+                        {lang === 'ar' ? 'تأكيد كلمة السر *' : 'Confirm Password *'}
+                      </label>
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder={lang === 'ar' ? 'أعد كتابة كلمة السر' : 'Re-enter password'}
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                       />
                     </div>
@@ -1086,22 +1706,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               )}
 
               {/* Discreet Admin Sign-In Section (Admin RBAC preserved) */}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500">
-                <span className="truncate">
-                  {lang === 'ar'
-                    ? `دخول الإدارة (${ADMIN_EMAIL}):`
-                    : `Platform Admin (${ADMIN_EMAIL}):`}
-                </span>
-                <button
-                  type="button"
-                  disabled={isLoading}
-                  onClick={handleAdminGoogleSignIn}
-                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
-                  <span>{lang === 'ar' ? 'دخول الأدمن (Google)' : 'Admin Google Login'}</span>
-                </button>
-              </div>
+              {forgotStep === 'none' && (
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                  <span className="truncate">
+                    {lang === 'ar'
+                      ? `دخول الإدارة (${ADMIN_EMAIL}):`
+                      : `Platform Admin (${ADMIN_EMAIL}):`}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={handleAdminGoogleSignIn}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                    <span>{lang === 'ar' ? 'دخول الأدمن (Google)' : 'Admin Google Login'}</span>
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             /* Signed-in Account / Complete Registration Form */
@@ -1458,6 +2080,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   )}
                 </div>
               </form>
+
+              {/* Optional Change Password Toggle for Phone Accounts */}
+              {!isAdmin && !isBanned && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowChangePwdBox((v) => !v);
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className="text-[11px] font-bold text-slate-600 dark:text-slate-400 hover:text-amber-600 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>{lang === 'ar' ? 'تغيير كلمة السر الحالية' : 'Change Password'}</span>
+                  </button>
+
+                  {showChangePwdBox && (
+                    <form onSubmit={handleProfileChangePassword} className="mt-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <input
+                          type="password"
+                          required
+                          minLength={6}
+                          value={profileNewPwd}
+                          onChange={(e) => setProfileNewPwd(e.target.value)}
+                          placeholder={lang === 'ar' ? 'كلمة السر الجديدة (6+ حروف)' : 'New password'}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                        <input
+                          type="password"
+                          required
+                          minLength={6}
+                          value={profileConfirmPwd}
+                          onChange={(e) => setProfileConfirmPwd(e.target.value)}
+                          placeholder={lang === 'ar' ? 'تأكيد كلمة السر الجديدة' : 'Confirm new password'}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="px-4 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold cursor-pointer"
+                      >
+                        {lang === 'ar' ? 'حفظ كلمة السر الجديدة' : 'Save Password'}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

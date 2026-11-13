@@ -390,6 +390,11 @@ export function normalizePhone(raw: string): string {
   return digits;
 }
 
+export function phoneToAuthEmail(rawPhone: string): string {
+  const normalized = normalizePhone(rawPhone);
+  return `u${normalized}@phone.noqbas.app`;
+}
+
 export function toE164Phone(raw: string): string {
   const trimmed = raw.trim();
   const digits = trimmed.replace(/\D/g, '');
