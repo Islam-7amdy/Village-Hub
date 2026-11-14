@@ -76,7 +76,7 @@ import { PrescriptionUploadModal } from './components/Modals/PrescriptionUploadM
 import { CartModal, CartItem } from './components/Modals/CartModal';
 import { EmergencyDirectoryModal } from './components/Modals/EmergencyDirectoryModal';
 import { VillageAssistantModal } from './components/Modals/VillageAssistantModal';
-import { MyBookingsModal } from './components/Modals/MyBookingsModal';
+import { NotificationsModal, AppNotificationItem } from './components/Modals/NotificationsModal';
 import { ReviewModal } from './components/Modals/ReviewModal';
 import { ProviderReviewsModal } from './components/Modals/ProviderReviewsModal';
 import { AuthModal } from './components/Modals/AuthModal';
@@ -152,7 +152,8 @@ export default function App() {
   const [isCartModalOpen, setIsCartModalOpen] = useState(false);
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [isAssistantModalOpen, setIsAssistantModalOpen] = useState(false);
-  const [isMyBookingsOpen, setIsMyBookingsOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [seenNotificationIds, setSeenNotificationIds] = useState<string[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
@@ -537,7 +538,24 @@ export default function App() {
 
   // 7. User Bookings Listener (when signed in)
   useEffect(() => {
-    if (!firebaseUser) return;
+    if (!firebaseUser) {
+      setBookings([]);
+      setSeenNotificationIds([]);
+      return;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(`noqbas_seen_notifs_${firebaseUser.uid}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setSeenNotificationIds(parsed);
+      } else {
+        setSeenNotificationIds([]);
+      }
+    } catch {
+      setSeenNotificationIds([]);
+    }
+
     const qBookings = isAdmin
       ? collection(db, 'bookings')
       : query(collection(db, 'bookings'), where('ownerId', '==', firebaseUser.uid));
@@ -808,9 +826,178 @@ export default function App() {
     [firestoreProviders, firestoreAds]
   );
 
+  // Live Notifications for Signed-In User
+  const userNotifications = useMemo<AppNotificationItem[]>(() => {
+    if (!firebaseUser) return [];
+    const list: AppNotificationItem[] = [];
+
+    if (isAdmin) {
+      const pendingProv = firestoreProviders.filter((p) => p.status === 'pending').length;
+      const pendingAds = firestoreAds.filter((a) => a.status === 'pending').length;
+      if (pendingProv > 0) {
+        list.push({
+          id: `admin-prov-${pendingProv}`,
+          type: 'admin',
+          tone: 'warning',
+          title: lang === 'ar' ? `طلبات مقدمي خدمة جديدة (${pendingProv})` : `${pendingProv} Pending Provider Request(s)`,
+          body: lang === 'ar'
+            ? 'فيه مقدمي خدمة جداد مستنيين موافقتك من لوحة الأدمن عشان يظهروا للناس.'
+            : 'New service provider applications await your review in the Admin Panel.'
+        });
+      }
+      if (pendingAds > 0) {
+        list.push({
+          id: `admin-ads-${pendingAds}`,
+          type: 'admin',
+          tone: 'warning',
+          title: lang === 'ar' ? `إعلانات بانتظار المراجعة (${pendingAds})` : `${pendingAds} Pending Ad(s)`,
+          body: lang === 'ar'
+            ? 'فيه إعلانات جديدة مستنية موافقتك في لوحة الأدمن.'
+            : 'New submitted ads await your approval in the Admin Panel.'
+        });
+      }
+    }
+
+    if (isCurrentUserBanned) {
+      list.push({
+        id: `ban-${ownPhoneBan?.banUntilMs || userProfile?.banUntilMs || 'perm'}`,
+        type: 'ban',
+        tone: 'danger',
+        title: lang === 'ar' ? 'الحساب محظور حالياً' : 'Account Currently Restricted',
+        body: lang === 'ar'
+          ? 'حسابك محظور مؤقتاً أو دائماً من تقديم طلبات جديدة.'
+          : 'Your account is restricted from submitting new requests.'
+      });
+    } else if (profileLoaded && !isAdmin && (!userProfile || !userProfile.phone)) {
+      list.push({
+        id: 'complete-profile-reminder',
+        type: 'account',
+        tone: 'warning',
+        title: lang === 'ar' ? 'استكمال بيانات الحساب' : 'Complete Your Profile',
+        body: lang === 'ar'
+          ? 'كمل بياناتك (الاسم ورقم الموبايل والعنوان) لتفعيل كل خدمات المنصة.'
+          : 'Add your name, mobile number, and address to unlock all services.'
+      });
+    }
+
+    if (userProfile?.role === 'provider') {
+      if (userProfile.providerStatus === 'approved') {
+        list.push({
+          id: 'prov-status-approved',
+          type: 'provider',
+          tone: 'success',
+          title: lang === 'ar' ? 'تم تفعيل حسابك كمقدم خدمة' : 'Provider Account Approved',
+          body: lang === 'ar'
+            ? 'مبروك! نشاطك ظاهر دلوقتي لكل أهالي القرية.'
+            : 'Your service profile is now live and visible across the village.'
+        });
+      } else if (userProfile.providerStatus === 'pending') {
+        list.push({
+          id: 'prov-status-pending',
+          type: 'provider',
+          tone: 'warning',
+          title: lang === 'ar' ? 'طلب مقدم الخدمة قيد المراجعة' : 'Provider Application Under Review',
+          body: lang === 'ar'
+            ? 'الأدمن بيراجع بياناتك وهيتفعل حسابك قريب.'
+            : 'Admin is reviewing your provider application.'
+        });
+      } else if (userProfile.providerStatus === 'rejected') {
+        list.push({
+          id: 'prov-status-rejected',
+          type: 'provider',
+          tone: 'danger',
+          title: lang === 'ar' ? 'تم رفض طلب مقدم الخدمة' : 'Provider Application Declined',
+          body: lang === 'ar'
+            ? 'راجع بياناتك من حسابك وعدلها لإعادة التقديم.'
+            : 'Please update your details from My Account and resubmit.'
+        });
+      }
+    }
+
+    allAds
+      .filter((ad) => ad.ownerId === firebaseUser.uid)
+      .forEach((ad) => {
+        list.push({
+          id: `ad-${ad.id}-${ad.status}`,
+          type: 'ad',
+          tone: ad.status === 'approved' ? 'success' : ad.status === 'rejected' ? 'danger' : 'warning',
+          title:
+            ad.status === 'approved'
+              ? lang === 'ar'
+                ? `تمت الموافقة على إعلانك: ${ad.title}`
+                : `Ad Approved: ${ad.title}`
+              : ad.status === 'rejected'
+              ? lang === 'ar'
+                ? `تم رفض إعلانك: ${ad.title}`
+                : `Ad Declined: ${ad.title}`
+              : lang === 'ar'
+              ? `إعلانك قيد المراجعة: ${ad.title}`
+              : `Ad Pending Review: ${ad.title}`,
+          body:
+            ad.status === 'approved'
+              ? lang === 'ar'
+                ? 'إعلانك معروض الآن في قسم الإعلانات والعروض.'
+                : 'Your ad is now live in the Ads & Offers showcase.'
+              : ad.status === 'rejected'
+              ? lang === 'ar'
+                ? 'لم تتم الموافقة على نشر الإعلان.'
+                : 'This ad was not approved for publication.'
+              : lang === 'ar'
+              ? 'هيظهر تلقائياً أول ما الأدمن يوافق عليه.'
+              : 'Will go live as soon as Admin approves it.'
+        });
+      });
+
+    bookings
+      .filter((b) => b.ownerId === firebaseUser.uid)
+      .forEach((b) => {
+        list.push({
+          id: `booking-${b.id}`,
+          type: 'booking',
+          tone: 'success',
+          title: b.title,
+          body: `${b.providerName}${b.totalAmountEgp ? ` · ${b.totalAmountEgp} ${lang === 'ar' ? 'ج.م' : 'EGP'}` : ''}`,
+          meta: [b.date, b.time].filter(Boolean).join(' · ')
+        });
+      });
+
+    return list;
+  }, [
+    firebaseUser,
+    isAdmin,
+    firestoreProviders,
+    firestoreAds,
+    isCurrentUserBanned,
+    ownPhoneBan,
+    userProfile,
+    profileLoaded,
+    allAds,
+    bookings,
+    lang
+  ]);
+
+  const unreadNotificationsCount = useMemo(
+    () => userNotifications.filter((n) => !seenNotificationIds.includes(n.id)).length,
+    [userNotifications, seenNotificationIds]
+  );
+
+  const handleMarkAllNotificationsRead = () => {
+    if (!firebaseUser) return;
+    const allIds = userNotifications.map((n) => n.id);
+    setSeenNotificationIds(allIds);
+    try {
+      window.localStorage.setItem(`noqbas_seen_notifs_${firebaseUser.uid}`, JSON.stringify(allIds));
+    } catch {
+      // Ignore storage quota errors
+    }
+  };
+
   // Save Booking to Firestore (when signed in) + Local State
   const persistBooking = async (booking: BookingRequest) => {
-    setBookings((prev) => [booking, ...prev]);
+    const withOwner: BookingRequest = firebaseUser
+      ? { ...booking, ownerId: booking.ownerId || firebaseUser.uid }
+      : booking;
+    setBookings((prev) => [withOwner, ...prev]);
     if (firebaseUser) {
       try {
         const payload: Record<string, unknown> = {
@@ -1235,9 +1422,9 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
-        bookingsCount={bookings.length}
+        notificationsCount={unreadNotificationsCount}
         onOpenCart={() => requireAuth(() => setIsCartModalOpen(true))}
-        onOpenMyBookings={() => requireAuth(() => setIsMyBookingsOpen(true))}
+        onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenEmergency={() => setIsEmergencyModalOpen(true)}
         onOpenAssistant={() => requireAuth(() => setIsAssistantModalOpen(true))}
         activeVillage={activeVillage}
@@ -1254,7 +1441,7 @@ export default function App() {
 
       {/* Main Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
-        {/* Hero Space Dedicated to Ads & Offers Showcase + All 10 Category Shortcuts */}
+        {/* Hero Space Dedicated to Ads & Offers Showcase (visible across all sections) */}
         <VillageHeroBanner
           lang={lang}
           activeTab={activeTab}
@@ -1264,24 +1451,22 @@ export default function App() {
           }}
           activeVillage={activeVillage}
           heroAdsSlot={
-            activeTab === 'all' ? (
-              <AdsSection
-                ads={allAds}
-                lang={lang}
-                activeVillageId={activeVillage.id}
-                activeVillageName={activeVillageName}
-                activeVillage={activeVillage}
-                currentUserId={firebaseUser?.uid || null}
-                currentUserName={userProfile?.displayName || firebaseUser?.displayName || (lang === 'ar' ? 'معلن من القرية' : 'Village Advertiser')}
-                defaultPhone={userProfile?.phone || ''}
-                isAdmin={isAdmin}
-                isBanned={isCurrentUserBanned}
-                adPricing={adPricing}
-                nowMs={nowMs}
-                canUseServices={canUsePlatformServices}
-                onRequireLogin={() => openAuthModal('login')}
-              />
-            ) : undefined
+            <AdsSection
+              ads={allAds}
+              lang={lang}
+              activeVillageId={activeVillage.id}
+              activeVillageName={activeVillageName}
+              activeVillage={activeVillage}
+              currentUserId={firebaseUser?.uid || null}
+              currentUserName={userProfile?.displayName || firebaseUser?.displayName || (lang === 'ar' ? 'معلن من القرية' : 'Village Advertiser')}
+              defaultPhone={userProfile?.phone || ''}
+              isAdmin={isAdmin}
+              isBanned={isCurrentUserBanned}
+              adPricing={adPricing}
+              nowMs={nowMs}
+              canUseServices={canUsePlatformServices}
+              onRequireLogin={() => openAuthModal('login')}
+            />
           }
         />
 
@@ -1603,10 +1788,12 @@ export default function App() {
         activeVillageName={activeVillageName}
       />
 
-      <MyBookingsModal
-        isOpen={isMyBookingsOpen}
-        onClose={() => setIsMyBookingsOpen(false)}
-        bookings={bookings}
+      <NotificationsModal
+        isOpen={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        notifications={userNotifications}
+        seenIds={seenNotificationIds}
+        onMarkAllRead={handleMarkAllNotificationsRead}
         lang={lang}
       />
 

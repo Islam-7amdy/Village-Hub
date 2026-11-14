@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   LogIn,
   ChevronDown,
-  Clock,
+  Bell,
   Search,
   X,
   LayoutGrid,
@@ -42,9 +42,9 @@ interface VillageHeaderProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   cartCount: number;
-  bookingsCount: number;
+  notificationsCount: number;
   onOpenCart: () => void;
-  onOpenMyBookings: () => void;
+  onOpenNotifications: () => void;
   onOpenEmergency: () => void;
   onOpenAssistant: () => void;
   activeVillage: VillageConfig;
@@ -69,9 +69,9 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
   searchQuery,
   onSearchChange,
   cartCount,
-  bookingsCount,
+  notificationsCount,
   onOpenCart,
-  onOpenMyBookings,
+  onOpenNotifications,
   onOpenEmergency,
   onOpenAssistant,
   activeVillage,
@@ -225,20 +225,25 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
               </button>
             )}
 
-            {/* My Bookings Button */}
-            <button
-              onClick={onOpenMyBookings}
-              title={t.myBookings}
-              className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Clock className={`w-3.5 h-3.5 ${theme.text}`} />
-              <span className="hidden xl:inline">{t.myBookings}</span>
-              {bookingsCount > 0 && (
-                <span className={`px-1.5 py-0.2 rounded-full ${theme.softBg} ${theme.text} text-[10px] font-bold font-mono`}>
-                  {bookingsCount}
-                </span>
-              )}
-            </button>
+            {/* Signed-in Notifications Bell Icon */}
+            {isSignedIn && (
+              <button
+                type="button"
+                onClick={onOpenNotifications}
+                title={t.notifications}
+                aria-label={t.notifications}
+                className="relative p-2 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer shrink-0"
+              >
+                <Bell className="w-4 h-4" />
+                {notificationsCount > 0 && (
+                  <span
+                    className={`absolute -top-0.5 -end-0.5 min-w-[16px] h-4 px-1 rounded-full ${theme.solidBg} text-white text-[10px] font-bold font-mono flex items-center justify-center`}
+                  >
+                    {notificationsCount}
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* Login / Account Button with Optional Profile Avatar */}
             <button

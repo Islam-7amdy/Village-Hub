@@ -351,6 +351,7 @@ export interface OtherService {
 
 export interface BookingRequest {
   id: string;
+  ownerId?: string;
   villageId?: string;
   serviceType: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride';
   title: string;
