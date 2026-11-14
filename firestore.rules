@@ -54,7 +54,7 @@ service cloud.firestore {
         data.keys().hasOnly([
           'id', 'nameAr', 'nameEn', 'governorateAr', 'governorateEn',
           'descriptionAr', 'descriptionEn', 'baseDeliveryFeeEgp', 'perKmFeeEgp',
-          'colorCode', 'isActive', 'createdAt'
+          'colorCode', 'logoIcon', 'logoUrl', 'isActive', 'createdAt'
         ]) &&
         isValidId(data.id) &&
         data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 80 &&
@@ -66,6 +66,8 @@ service cloud.firestore {
         data.baseDeliveryFeeEgp is number && data.baseDeliveryFeeEgp >= 0 && data.baseDeliveryFeeEgp <= 500 &&
         data.perKmFeeEgp is number && data.perKmFeeEgp >= 0 && data.perKmFeeEgp <= 200 &&
         (!('colorCode' in data) || (data.colorCode in ['amber', 'emerald', 'blue', 'teal', 'rose', 'indigo'])) &&
+        (!('logoIcon' in data) || (data.logoIcon in ['wheat', 'trees', 'landmark', 'waves', 'sun', 'building', 'sprout', 'compass'])) &&
+        (!('logoUrl' in data) || (data.logoUrl is string && data.logoUrl.size() <= 45000)) &&
         data.isActive is bool &&
         data.createdAt is timestamp;
     }

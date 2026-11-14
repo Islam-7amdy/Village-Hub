@@ -23,8 +23,9 @@ import {
 import {
   Language,
   UserProfile,
-  VillageConfig,
   BannedPhoneRecord,
+  DemoTestAccount,
+  TEST_DEMO_ACCOUNTS,
   normalizePhone,
   phoneToAuthEmail,
   toE164Phone,
@@ -63,12 +64,13 @@ interface AuthModalProps {
   initialMode?: 'login' | 'register';
   firebaseUser: FirebaseUser | null;
   userProfile: UserProfile | null;
+  activeDemoAccount?: DemoTestAccount | null;
+  onLoginDemoAccount: (account: DemoTestAccount) => void;
+  onLogoutDemoAccount: () => void;
   isAdmin: boolean;
   isBanned?: boolean;
   banReason?: string;
   banUntilMs?: number;
-  villages: VillageConfig[];
-  activeVillageId: string;
   onProfileSaved: () => void;
   onOpenAdminPanel: () => void;
 }
@@ -121,12 +123,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialMode = 'login',
   firebaseUser,
   userProfile,
+  activeDemoAccount = null,
+  onLoginDemoAccount,
+  onLogoutDemoAccount,
   isAdmin,
   isBanned,
   banReason,
   banUntilMs,
-  villages,
-  activeVillageId,
   onProfileSaved,
   onOpenAdminPanel
 }) => {
@@ -164,7 +167,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [profileConfirmPwd, setProfileConfirmPwd] = useState('');
 
   const [photoUrl, setPhotoUrl] = useState('');
-  const [villageId, setVillageId] = useState(activeVillageId);
+  const villageId = 'noqbas';
   const [serviceCategory, setServiceCategory] = useState<ProviderCategory>('technician');
   const [serviceTitle, setServiceTitle] = useState('');
   const [serviceFeeEgp, setServiceFeeEgp] = useState('');
@@ -207,7 +210,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   }, [isOpen, initialMode]);
 
   useEffect(() => {
-    if (firebaseUser) {
+    if (activeDemoAccount) {
+      setDisplayName(activeDemoAccount.displayName || '');
+      setPhone(activeDemoAccount.phone || '');
+      setAddress(activeDemoAccount.address || activeDemoAccount.neighborhood || '');
+      setPhotoUrl(activeDemoAccount.photoUrl || '');
+      setRole(activeDemoAccount.role);
+      if (
+        activeDemoAccount.serviceCategory &&
+        activeDemoAccount.serviceCategory !== 'none' &&
+        activeDemoAccount.serviceCategory !== 'farm'
+      ) {
+        setServiceCategory(activeDemoAccount.serviceCategory);
+      }
+      setServiceTitle(activeDemoAccount.serviceTitle || '');
+      setServiceFeeEgp(activeDemoAccount.serviceFeeEgp || '');
+      setServiceBio(activeDemoAccount.serviceBio || '');
+    } else if (firebaseUser) {
       const normalizedAuthPhone = firebaseUser.phoneNumber
         ? normalizePhone(firebaseUser.phoneNumber)
         : '';
@@ -215,7 +234,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setPhone(userProfile?.phone || normalizedAuthPhone || '');
       setAddress(userProfile?.address || userProfile?.neighborhood || '');
       setPhotoUrl(userProfile?.photoUrl || '');
-      setVillageId(userProfile?.villageId || activeVillageId);
       if (userProfile?.role) setRole(userProfile.role);
       if (
         userProfile?.serviceCategory &&
@@ -227,10 +245,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setServiceTitle(userProfile?.serviceTitle || '');
       setServiceFeeEgp(userProfile?.serviceFeeEgp || '');
       setServiceBio(userProfile?.serviceBio || '');
-    } else {
-      setVillageId(activeVillageId);
     }
-  }, [firebaseUser, userProfile, activeVillageId, isOpen]);
+  }, [activeDemoAccount, firebaseUser, userProfile, isOpen]);
 
   useEffect(() => {
     return () => {
@@ -480,6 +496,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ? 'اكتب كلمة السر (6 حروف أو أرقام على الأقل).'
           : 'Please enter your password (at least 6 characters).'
       );
+      return;
+    }
+
+    // Support Test Demo Accounts via Phone + Password (123456)
+    const matchedDemo = TEST_DEMO_ACCOUNTS.find(
+      (acc) => normalizePhone(acc.phone) === normalized && acc.password === password
+    );
+    if (matchedDemo) {
+      onLoginDemoAccount(matchedDemo);
+      setSuccessMsg(
+        lang === 'ar'
+          ? `أهلاً بيك يا ${matchedDemo.displayName}! تم تسجيل الدخول بحساب التجربة.`
+          : `Welcome back, ${matchedDemo.displayName}!`
+      );
+      setTimeout(() => {
+        setSuccessMsg('');
+        onClose();
+      }, 700);
       return;
     }
 
@@ -917,6 +951,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   const handleSignOut = async () => {
+    if (activeDemoAccount) {
+      onLogoutDemoAccount();
+      onClose();
+      return;
+    }
     await signOut(auth);
     onClose();
   };
@@ -944,6 +983,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Save/update profile for an already-authenticated user
   const handleSaveAuthenticatedProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (activeDemoAccount) {
+      onLoginDemoAccount({
+        ...activeDemoAccount,
+        displayName: displayName.trim() || activeDemoAccount.displayName,
+        address: address.trim() || activeDemoAccount.address,
+        neighborhood: address.trim() || activeDemoAccount.neighborhood,
+        photoUrl: photoUrl || activeDemoAccount.photoUrl,
+        serviceTitle: activeDemoAccount.role === 'provider' ? serviceTitle.trim() : '',
+        serviceFeeEgp: activeDemoAccount.role === 'provider' ? serviceFeeEgp.trim() : '',
+        serviceBio: activeDemoAccount.role === 'provider' ? serviceBio.trim() : ''
+      });
+      setSuccessMsg(
+        lang === 'ar'
+          ? 'تم تحديث بيانات حساب التجربة بنجاح ✓'
+          : 'Test account profile updated ✓'
+      );
+      setTimeout(() => {
+        setSuccessMsg('');
+        onClose();
+      }, 900);
+      return;
+    }
+
     if (!firebaseUser) return;
 
     if (isBanned) {
@@ -1016,7 +1078,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   ];
 
   const displayAvatar = photoUrl || '';
-  const showUnauthOrFlowView = !firebaseUser || forgotStep !== 'none' || isCompletingRegister;
+  const effectiveProfile = activeDemoAccount || userProfile;
+  const effectiveSignedIn = Boolean(firebaseUser || activeDemoAccount);
+  const showUnauthOrFlowView = !effectiveSignedIn || forgotStep !== 'none' || isCompletingRegister;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs">
@@ -1054,12 +1118,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 : showUnauthOrFlowView
                 ? authTab === 'login'
                   ? lang === 'ar'
-                    ? 'ادخل برقم الموبايل وكلمة السر مباشرة'
-                    : 'Sign in with your mobile phone & password'
+                    ? 'ادخل برقم الموبايل وكلمة السر مباشرة — قرية نقباس'
+                    : 'Sign in with your mobile phone & password — Noqbas Village'
                   : lang === 'ar'
                   ? 'التسجيل بالاسم ورقم الهاتف والعنوان وكلمة السر — مع تأكيد الهاتف برسالة SMS'
                   : 'Register with Name, Phone, Address & Password — verified via SMS OTP'
-                : userProfile?.phone || firebaseUser?.phoneNumber || firebaseUser?.email}
+                : effectiveProfile?.phone || firebaseUser?.phoneNumber || firebaseUser?.email}
             </p>
           </div>
           <button
@@ -1457,6 +1521,74 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         : 'New user? Create a new account'}
                     </button>
                   </div>
+
+                  {/* Quick Test Accounts Showcase (2 Users + 2 Service Providers) */}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-slate-800 dark:text-slate-200">
+                        {lang === 'ar'
+                          ? 'حسابات التجربة السريعة (قرية نقباس)'
+                          : 'Quick Test Accounts (Noqbas Village)'}
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                        {lang === 'ar' ? 'كلمة السر: 123456' : 'Pass: 123456'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {TEST_DEMO_ACCOUNTS.map((acc) => {
+                        const isProvider = acc.role === 'provider';
+                        return (
+                          <button
+                            key={acc.uid}
+                            type="button"
+                            onClick={() => {
+                              onLoginDemoAccount(acc);
+                              onClose();
+                            }}
+                            className={`p-2.5 rounded-2xl border text-start transition-all cursor-pointer hover:shadow-xs ${
+                              isProvider
+                                ? 'border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-50'
+                                : 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 hover:bg-emerald-50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5 mb-1">
+                              <span className="font-bold text-slate-900 dark:text-white truncate">
+                                {acc.displayName}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold shrink-0 ${
+                                  isProvider
+                                    ? 'text-amber-700 dark:text-amber-400'
+                                    : 'text-emerald-700 dark:text-emerald-400'
+                                }`}
+                              >
+                                {isProvider
+                                  ? acc.providerStatus === 'approved'
+                                    ? lang === 'ar'
+                                      ? 'مقدم خدمة ✓'
+                                      : 'Provider ✓'
+                                    : lang === 'ar'
+                                    ? 'مقدم خدمة (مراجعة)'
+                                    : 'Provider (Pending)'
+                                  : lang === 'ar'
+                                  ? 'مستخدم'
+                                  : 'User'}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                              <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                                {acc.phone}
+                              </span>
+                              <span className="font-bold text-amber-700 dark:text-amber-400">
+                                {lang === 'ar' ? 'دخول سريع ←' : 'Quick Sign In →'}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </form>
               ) : (
                 /* Tab 2 Form: New User Registration (Name + Phone + Address + Password + SMS OTP) */
@@ -1566,39 +1698,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        <MapPin className="w-3 h-3 inline me-1" />
-                        {lang === 'ar' ? 'القرية *' : 'Village *'}
-                      </label>
-                      <select
-                        value={villageId}
-                        onChange={(e) => setVillageId(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      >
-                        {villages.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {lang === 'ar' ? v.nameAr : v.nameEn}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-semibold text-slate-700 dark:text-slate-300">
                         <Home className="w-3 h-3 inline me-1" />
-                        {lang === 'ar' ? 'العنوان بالتفصيل *' : 'Full Address *'}
+                        {lang === 'ar' ? 'العنوان بالتفصيل في قرية نقباس *' : 'Full Address in Noqbas *'}
                       </label>
-                      <input
-                        type="text"
-                        required
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
-                        placeholder={lang === 'ar' ? 'الناحية / الشارع / علامة مميزة' : 'Quarter / Street / Landmark'}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
+                      <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {lang === 'ar' ? 'قرية نقباس' : 'Noqbas Village'}
+                      </span>
                     </div>
+                    <input
+                      type="text"
+                      required
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder={lang === 'ar' ? 'الناحية / الشارع / علامة مميزة' : 'Quarter / Street / Landmark'}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1750,11 +1868,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               )}
 
-              {(!userProfile || !userProfile.phone || !userProfile.address) && !isBanned && !isAdmin && (
+              {(!effectiveProfile || !effectiveProfile.phone || !effectiveProfile.address) && !isBanned && !isAdmin && (
                 <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 font-semibold">
                   {lang === 'ar'
                     ? 'كمل بيانات حسابك (الاسم، رقم الهاتف، والعنوان) واضغط حفظ عشان تستفيد بكل خدمات المنصة.'
                     : 'Please complete your Name, Phone Number, and Address to unlock all platform services.'}
+                </div>
+              )}
+
+              {activeDemoAccount && (
+                <div className="p-3 rounded-2xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-sky-900 dark:text-sky-200 flex items-center justify-between gap-2">
+                  <span className="font-bold">
+                    {lang === 'ar'
+                      ? `أنت مسجل حالياً بحساب تجربة (${activeDemoAccount.labelAr})`
+                      : `Signed in with Test Account (${activeDemoAccount.labelEn})`}
+                  </span>
+                  <span className="font-mono text-[11px] font-bold">{activeDemoAccount.phone}</span>
                 </div>
               )}
 
@@ -1768,8 +1897,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       </div>
                       <div className="text-[11px] text-amber-700 dark:text-amber-300">
                         {lang === 'ar'
-                          ? 'تقدر تتابع الإحصائيات والمستخدمين والحظر وتبديل القرى.'
-                          : 'View analytics, manage users/bans, and moderate ads & providers.'}
+                          ? 'تقدر تتابع الإحصائيات المفصلة، المستخدمين، الحظر، الإعلانات، وإعدادات قرية نقباس.'
+                          : 'View analytics, manage users/bans, moderate ads, and customize Noqbas.'}
                       </div>
                     </div>
                   </div>
@@ -1786,29 +1915,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               )}
 
-              {userProfile?.role === 'provider' && (
+              {effectiveProfile?.role === 'provider' && (
                 <div
                   className={`p-3.5 rounded-2xl border flex items-center gap-3 ${
-                    userProfile.providerStatus === 'approved'
+                    effectiveProfile.providerStatus === 'approved'
                       ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-900 dark:text-emerald-200'
-                      : userProfile.providerStatus === 'rejected'
+                      : effectiveProfile.providerStatus === 'rejected'
                       ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-900 dark:text-rose-200'
                       : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200'
                   }`}
                 >
-                  {userProfile.providerStatus === 'approved' ? (
+                  {effectiveProfile.providerStatus === 'approved' ? (
                     <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  ) : userProfile.providerStatus === 'rejected' ? (
+                  ) : effectiveProfile.providerStatus === 'rejected' ? (
                     <XCircle className="w-5 h-5 text-rose-600 shrink-0" />
                   ) : (
                     <Clock className="w-5 h-5 text-amber-600 shrink-0" />
                   )}
                   <div className="font-bold">
-                    {userProfile.providerStatus === 'approved'
+                    {effectiveProfile.providerStatus === 'approved'
                       ? lang === 'ar'
                         ? 'حسابك كمقدم خدمة مقبول ومفعل على المنصة ✓'
                         : 'Your provider account is Approved & Live ✓'
-                      : userProfile.providerStatus === 'rejected'
+                      : effectiveProfile.providerStatus === 'rejected'
                       ? lang === 'ar'
                         ? 'للأسف الأدمن رفض الطلب حالياً — راجع بياناتك'
                         : 'Provider request not approved yet'
@@ -1886,7 +2015,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <form key="authenticated-profile-form" onSubmit={handleSaveAuthenticatedProfile} className="space-y-3.5">
-                {!userProfile && (
+                {!effectiveProfile && (
                   <div>
                     <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                       {lang === 'ar' ? 'نوع الحساب' : 'Account Type'}
@@ -1942,6 +2071,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       type="tel"
                       required
                       value={phone}
+                      readOnly={Boolean(activeDemoAccount)}
                       onChange={(e) => setPhone(e.target.value)}
                       placeholder="010XXXXXXXX"
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
@@ -1949,39 +2079,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      <MapPin className="w-3 h-3 inline me-1" />
-                      {lang === 'ar' ? 'القرية *' : 'Village *'}
-                    </label>
-                    <select
-                      value={villageId}
-                      onChange={(e) => setVillageId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    >
-                      {villages.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {lang === 'ar' ? v.nameAr : v.nameEn}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300">
                       <Home className="w-3 h-3 inline me-1" />
-                      {lang === 'ar' ? 'العنوان بالتفصيل *' : 'Full Address *'}
+                      {lang === 'ar' ? 'العنوان بالتفصيل في قرية نقباس *' : 'Full Address in Noqbas *'}
                     </label>
-                    <input
-                      type="text"
-                      required
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      placeholder={lang === 'ar' ? 'مثال: الناحية الشرقية - شارع المسجد' : 'East Quarter - Mosque St'}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    />
+                    <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                      <MapPin className="w-3 h-3" />
+                      {lang === 'ar' ? 'قرية نقباس' : 'Noqbas Village'}
+                    </span>
                   </div>
+                  <input
+                    type="text"
+                    required
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder={lang === 'ar' ? 'مثال: الناحية الشرقية - شارع المسجد' : 'East Quarter - Mosque St'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
                 </div>
 
                 {role === 'provider' && (
@@ -2071,7 +2187,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         ? lang === 'ar'
                           ? 'جاري الحفظ...'
                           : 'Saving...'
-                        : userProfile
+                        : effectiveProfile
                         ? lang === 'ar'
                           ? 'تحديث البيانات'
                           : 'Update Profile'
@@ -2084,7 +2200,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </form>
 
               {/* Optional Change Password Toggle for Phone Accounts */}
-              {!isAdmin && !isBanned && (
+              {!isAdmin && !isBanned && !activeDemoAccount && (
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"

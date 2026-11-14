@@ -110,6 +110,27 @@ export interface VillageDistrict {
   distanceKm: number;
 }
 
+export type VillageLogoIconId =
+  | 'wheat'
+  | 'trees'
+  | 'landmark'
+  | 'waves'
+  | 'sun'
+  | 'building'
+  | 'sprout'
+  | 'compass';
+
+export const VILLAGE_LOGO_PRESETS: { id: VillageLogoIconId; label: { ar: string; en: string } }[] = [
+  { id: 'wheat', label: { ar: 'سنبلة القمح', en: 'Wheat' } },
+  { id: 'trees', label: { ar: 'نخيل وخضرة', en: 'Trees' } },
+  { id: 'landmark', label: { ar: 'معلم القرية', en: 'Landmark' } },
+  { id: 'waves', label: { ar: 'النيل والترعة', en: 'Waterway' } },
+  { id: 'sun', label: { ar: 'شمس البلد', en: 'Sun' } },
+  { id: 'building', label: { ar: 'مبنى البلد', en: 'Town Hall' } },
+  { id: 'sprout', label: { ar: 'زرعة الخير', en: 'Sprout' } },
+  { id: 'compass', label: { ar: 'دليل القرية', en: 'Compass' } }
+];
+
 export interface VillageConfig {
   id: string;
   nameAr: string;
@@ -121,6 +142,8 @@ export interface VillageConfig {
   baseDeliveryFeeEgp: number;
   perKmFeeEgp: number;
   colorCode: VillageColorCode;
+  logoIcon?: VillageLogoIconId;
+  logoUrl?: string;
   isActive: boolean;
   districts: VillageDistrict[];
 }
@@ -453,36 +476,212 @@ export const DEFAULT_VILLAGES: VillageConfig[] = [
     baseDeliveryFeeEgp: 10,
     perKmFeeEgp: 5,
     colorCode: 'amber',
+    logoIcon: 'wheat',
     isActive: true,
     districts: DEFAULT_DISTRICTS
+  }
+];
+
+export interface DemoTestAccount extends UserProfile {
+  password: string;
+  labelAr: string;
+  labelEn: string;
+}
+
+export const TEST_DEMO_ACCOUNTS: DemoTestAccount[] = [
+  {
+    uid: 'test-user-1',
+    displayName: 'أحمد محمود',
+    phone: '01011111111',
+    password: '123456',
+    address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
+    neighborhood: 'وسط البلد - نقباس',
+    role: 'resident',
+    villageId: 'noqbas',
+    providerStatus: 'none',
+    serviceCategory: 'none',
+    isBanned: false,
+    labelAr: 'حساب مستخدم ١ (للتجربة)',
+    labelEn: 'Test User 1'
   },
   {
-    id: 'minya',
-    nameAr: 'قرية منية سمنود',
-    nameEn: 'Minyat Samanoud',
-    governorateAr: 'مركز أجا - الدقهلية',
-    governorateEn: 'Aga - Dakahlia',
-    descriptionAr: 'خدمات أهالي منية سمنود بالكامل من عيادات وصيدليات وبقالة ومدرسين',
-    descriptionEn: 'Full community services, clinics, pharmacies, groceries, and tutors for Minyat Samanoud',
-    baseDeliveryFeeEgp: 12,
-    perKmFeeEgp: 5,
-    colorCode: 'emerald',
-    isActive: true,
-    districts: DEFAULT_DISTRICTS
+    uid: 'test-user-2',
+    displayName: 'سارة حسن',
+    phone: '01022222222',
+    password: '123456',
+    address: 'قرية نقباس - الناحية الشرقية طريق الترعة',
+    neighborhood: 'الناحية الشرقية - نقباس',
+    role: 'resident',
+    villageId: 'noqbas',
+    providerStatus: 'none',
+    serviceCategory: 'none',
+    isBanned: false,
+    labelAr: 'حساب مستخدم ٢ (للتجربة)',
+    labelEn: 'Test User 2'
   },
   {
-    id: 'kafr-saad',
-    nameAr: 'قرية كفر سعد',
-    nameEn: 'Kafr Saad Village',
-    governorateAr: 'محافظة دمياط',
-    governorateEn: 'Damietta Governorate',
-    descriptionAr: 'بوابة خدمات كفر سعد: عيادات، صنايعية، سوبر ماركت، ومواصلات',
-    descriptionEn: 'Kafr Saad services hub: clinics, craftsmen, grocery, and rides',
-    baseDeliveryFeeEgp: 10,
-    perKmFeeEgp: 6,
-    colorCode: 'blue',
-    isActive: true,
-    districts: DEFAULT_DISTRICTS
+    uid: 'test-prov-1',
+    displayName: 'د. كريم الشناوي',
+    phone: '01033333333',
+    password: '123456',
+    address: 'قرية نقباس - الشارع العمومي بجوار الصيدلية',
+    neighborhood: 'الشارع العمومي - نقباس',
+    role: 'provider',
+    villageId: 'noqbas',
+    providerStatus: 'approved',
+    serviceCategory: 'doctor',
+    serviceTitle: 'طب وجراحة الفم والأسنان',
+    serviceFeeEgp: '150 ج.م',
+    serviceBio: 'حشو وعلاج جذور وتنظيف جير وتقويم أسنان بأحدث الأجهزة في نقباس.',
+    isBanned: false,
+    labelAr: 'مقدم خدمة ١ — دكتور معتمد (للتجربة)',
+    labelEn: 'Test Provider 1 (Approved Doctor)'
+  },
+  {
+    uid: 'test-prov-2',
+    displayName: 'الأسطى عادل نجار',
+    phone: '01044444444',
+    password: '123456',
+    address: 'قرية نقباس - الناحية الغربية مفرق المدارس',
+    neighborhood: 'الناحية الغربية - نقباس',
+    role: 'provider',
+    villageId: 'noqbas',
+    providerStatus: 'pending',
+    serviceCategory: 'technician',
+    serviceTitle: 'سباكة صحية وصيانة مواتير ميه',
+    serviceFeeEgp: '80 ج.م للمعاينة',
+    serviceBio: 'تأسيس وصيانة سباكة الحمامات والمطابخ وتركيب المواتير داخل نقباس.',
+    isBanned: false,
+    labelAr: 'مقدم خدمة ٢ — فني سباكة (قيد المراجعة)',
+    labelEn: 'Test Provider 2 (Pending Technician)'
+  }
+];
+
+export const TEST_DEMO_PROVIDERS: ProviderListing[] = [
+  {
+    id: 'test-prov-1',
+    ownerId: 'test-prov-1',
+    villageId: 'noqbas',
+    nameAr: 'د. كريم الشناوي',
+    nameEn: 'Dr. Karim El-Shenawy',
+    category: 'doctor',
+    specialtyAr: 'طب وجراحة الفم والأسنان',
+    specialtyEn: 'Dentistry & Oral Surgery',
+    phone: '01033333333',
+    neighborhoodAr: 'الشارع العمومي - بجوار الصيدلية',
+    neighborhoodEn: 'Main Street - Near Pharmacy',
+    priceLabelAr: '150 ج.م',
+    priceLabelEn: '150 EGP',
+    bioAr: 'حشو وعلاج جذور وتنظيف جير وتقويم أسنان بأحدث الأجهزة في نقباس.',
+    bioEn: 'Modern dental care, fillings, root canal, and orthodontics in Noqbas.',
+    status: 'approved'
+  },
+  {
+    id: 'test-prov-2',
+    ownerId: 'test-prov-2',
+    villageId: 'noqbas',
+    nameAr: 'الأسطى عادل نجار',
+    nameEn: 'Master Adel Naggar',
+    category: 'technician',
+    specialtyAr: 'سباكة صحية وصيانة مواتير ميه',
+    specialtyEn: 'Plumbing & Water Pump Repair',
+    phone: '01044444444',
+    neighborhoodAr: 'الناحية الغربية - مفرق المدارس',
+    neighborhoodEn: 'West Quarter - School Junction',
+    priceLabelAr: '80 ج.م للمعاينة',
+    priceLabelEn: '80 EGP / Visit',
+    bioAr: 'تأسيس وصيانة سباكة الحمامات والمطابخ وتركيب المواتير داخل نقباس.',
+    bioEn: 'Home plumbing, water pumps, and leak repairs across Noqbas.',
+    status: 'pending'
+  }
+];
+
+export const TEST_DEMO_BOOKINGS: BookingRequest[] = [
+  {
+    id: 'book-demo-1',
+    ownerId: 'test-user-1',
+    villageId: 'noqbas',
+    serviceType: 'doctor',
+    title: 'كشف باطنة ومتابعة ضغط وسكر',
+    providerName: 'د. طارق الخطيب',
+    customerName: 'أحمد محمود',
+    customerPhone: '01011111111',
+    address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
+    date: '2026-11-14',
+    time: '10:00 AM',
+    totalAmountEgp: 100,
+    status: 'confirmed',
+    createdAt: '2026-11-13'
+  },
+  {
+    id: 'book-demo-2',
+    ownerId: 'test-user-1',
+    villageId: 'noqbas',
+    serviceType: 'food',
+    title: 'طلب طعام: فطير مشلتت بالسمن البلدي',
+    providerName: 'فرن ومخبز البركة البلدي',
+    customerName: 'أحمد محمود',
+    customerPhone: '01011111111',
+    address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
+    distanceKm: 0.5,
+    deliveryFeeEgp: 13,
+    totalAmountEgp: 153,
+    date: '2026-11-14',
+    time: '01:30 PM',
+    status: 'completed',
+    createdAt: '2026-11-14'
+  },
+  {
+    id: 'book-demo-3',
+    ownerId: 'test-user-2',
+    villageId: 'noqbas',
+    serviceType: 'pharmacy',
+    title: 'طلب صيدلية: فيتامينات ومستلزمات أطفال',
+    providerName: 'صيدلية الشفاء - د. هاني',
+    customerName: 'سارة حسن',
+    customerPhone: '01022222222',
+    address: 'قرية نقباس - الناحية الشرقية طريق الترعة',
+    distanceKm: 1.5,
+    deliveryFeeEgp: 18,
+    totalAmountEgp: 248,
+    date: '2026-11-14',
+    time: '04:00 PM',
+    status: 'confirmed',
+    createdAt: '2026-11-14'
+  },
+  {
+    id: 'book-demo-4',
+    ownerId: 'test-user-2',
+    villageId: 'noqbas',
+    serviceType: 'technician',
+    title: 'صيانة كهرباء ومنظم جهد بالمنزل',
+    providerName: 'الأسطى أحمد النجار (أبو أحمد)',
+    customerName: 'سارة حسن',
+    customerPhone: '01022222222',
+    address: 'قرية نقباس - الناحية الشرقية طريق الترعة',
+    date: '2026-11-15',
+    time: '11:00 AM',
+    totalAmountEgp: 80,
+    status: 'pending',
+    createdAt: '2026-11-14'
+  },
+  {
+    id: 'book-demo-5',
+    ownerId: 'test-user-1',
+    villageId: 'noqbas',
+    serviceType: 'grocery',
+    title: 'مقاضي سوبر ماركت وسلة خضار طازة',
+    providerName: 'سوبر ماركت البركة',
+    customerName: 'أحمد محمود',
+    customerPhone: '01011111111',
+    address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
+    distanceKm: 0.5,
+    deliveryFeeEgp: 13,
+    totalAmountEgp: 318,
+    date: '2026-11-14',
+    time: '06:00 PM',
+    status: 'completed',
+    createdAt: '2026-11-14'
   }
 ];
 
@@ -530,36 +729,6 @@ export const VILLAGE_DOCTORS: DoctorService[] = [
     availableDays: { ar: 'موجودة 24 ساعة للحالات العاجلة', en: 'Daily 24/7 for Injections & Dressing' },
     fee: { ar: '50 ج.م للزيارة', en: '50 EGP per visit' },
     supportsHomeVisit: true,
-    avatar: '/src/assets/images/doctor_sarah_jenkins_1794474295843.jpg'
-  },
-  {
-    id: 'doc-minya-1',
-    villageId: 'minya',
-    name: { ar: 'د. شريف عبد الرحمن', en: 'Dr. Sherif Abdelrahman' },
-    specialty: { ar: 'أخصائي عظام ومفاصل', en: 'Orthopedic & Joint Specialist' },
-    clinicName: { ar: 'عيادة الشفاء - منية سمنود', en: 'Al-Shifa Clinic - Minyat Samanoud' },
-    phone: '01098765432',
-    location: { ar: 'شارع البحر الرئيسي - قدام المسجد الكبير', en: 'Canal Street - Front of Grand Mosque' },
-    rating: 4.8,
-    reviewsCount: 45,
-    availableDays: { ar: 'السبت والأتنين والأربع: 5 م - 10 م', en: 'Sat, Mon, Wed: 5:00 PM - 10:00 PM' },
-    fee: { ar: '180 ج.م', en: '180 EGP' },
-    supportsHomeVisit: false,
-    avatar: '/src/assets/images/doctor_marcus_vance_1794474296129.jpg'
-  },
-  {
-    id: 'doc-kafr-1',
-    villageId: 'kafr-saad',
-    name: { ar: 'د. منى السيد', en: 'Dr. Mona El-Sayed' },
-    specialty: { ar: 'أخصائية نساء وتوليد ومتابعة حمل', en: 'OB/GYN & Prenatal Care' },
-    clinicName: { ar: 'مركز كفر سعد الطبي', en: 'Kafr Saad Medical Center' },
-    phone: '01200998877',
-    location: { ar: 'ميدان المحطة - كفر سعد', en: 'Station Square - Kafr Saad' },
-    rating: 4.9,
-    reviewsCount: 73,
-    availableDays: { ar: 'يومياً من 1 ظهراً - 7 مساءً', en: 'Daily: 1:00 PM - 7:00 PM' },
-    fee: { ar: '160 ج.م', en: '160 EGP' },
-    supportsHomeVisit: false,
     avatar: '/src/assets/images/doctor_sarah_jenkins_1794474295843.jpg'
   }
 ];
@@ -639,25 +808,6 @@ export const VILLAGE_TECHNICIANS: TechnicianService[] = [
     bio: {
       ar: 'حلول الطاقة الشمسية لتشغيل طلمبات الري أو إنارة البيوت وقت قطع النور، ببطاريات عمرها طويل.',
       en: 'Off-grid solar inverters for farm irrigation pumps and backup home battery banks.'
-    }
-  },
-  {
-    id: 'tech-minya-1',
-    villageId: 'minya',
-    name: { ar: 'الأسطى كريم للنجارة والألوميتال', en: 'Master Karim (Carpentry & Aluminum)' },
-    craft: { ar: 'تصليح أبواب وشبابيك ألوميتال وخشب', en: 'Doors, Windows & Furniture Repair' },
-    category: 'carpenter',
-    phone: '01033445566',
-    whatsapp: '201033445566',
-    rating: 4.8,
-    reviewsCount: 41,
-    experienceYears: 12,
-    hourlyRate: { ar: '90 ج.م / زيارة', en: '90 EGP / Visit' },
-    neighborhood: { ar: 'منية سمنود - وسط البلد', en: 'Minyat Samanoud Center' },
-    avatar: '/src/assets/images/village_technician_electrician_1794475355366.jpg',
-    bio: {
-      ar: 'تغيير كوالين، تركيب سلك ناموس، وصيانة دولاب ومطبخ الخشب والألوميتال.',
-      en: 'Locks, mosquito screens, kitchen cabinets, and aluminum window maintenance.'
     }
   }
 ];
@@ -1044,28 +1194,6 @@ export const VILLAGE_GROCERY_ITEMS: GroceryItem[] = [
     price: 115,
     unit: { ar: 'علبة جبنة + 2ك لبن', en: 'Cheese + 2kg Milk' },
     currency: { ar: 'ج.م', en: 'EGP' }
-  },
-  {
-    id: 'groc-5',
-    villageId: 'minya',
-    name: { ar: 'كرتونة مسحوق غسيل أوتوماتيك 4 كيلو + صابون مواعين', en: 'Laundry Detergent 4kg + Dish Soap Pack' },
-    storeName: { ar: 'هايبر منية سمنود التعاوني', en: 'Minyat Samanoud Co-op Mart' },
-    description: { ar: 'عرض المنظفات الشهري للبيت بخصم أهالي منية سمنود', en: 'Monthly home cleaning bundle with resident discount' },
-    category: 'cleaning',
-    price: 210,
-    unit: { ar: 'طقم منظفات', en: 'Cleaning Bundle' },
-    currency: { ar: 'ج.م', en: 'EGP' }
-  },
-  {
-    id: 'groc-6',
-    villageId: 'kafr-saad',
-    name: { ar: 'شنطة السوبر ماركت الأسبوعية (سكر، شاي، مكرونة، صلصة)', en: 'Weekly Pantry Bag (Sugar, Tea, Pasta, Paste)' },
-    storeName: { ar: 'سوق كفر سعد الحديث', en: 'Kafr Saad Modern Grocery' },
-    description: { ar: 'مقاضي البيت الأساسية جاهزة للتوصيل لأي حي في كفر سعد', en: 'Essential weekly pantry items ready for home delivery in Kafr Saad' },
-    category: 'staples',
-    price: 195,
-    unit: { ar: 'شنطة كاملة', en: 'Full Bag' },
-    currency: { ar: 'ج.م', en: 'EGP' }
   }
 ];
 
@@ -1108,32 +1236,6 @@ export const VILLAGE_TUTORING_SERVICES: TutoringService[] = [
     location: { ar: 'مكتبة المسجد الكبير - وسط البلد', en: 'Grand Mosque Hall - Center' },
     phone: '01288990011',
     mode: { ar: 'حلقات تحفيظ يومية', en: 'Daily Study Circles' }
-  },
-  {
-    id: 'tut-4',
-    villageId: 'minya',
-    teacherName: { ar: 'د. مروة الشافعي', en: 'Dr. Marwa El-Shafei' },
-    subject: { ar: 'علوم، كيمياء وأحياء للمرحلة الثانوية', en: 'Science, Chemistry & Biology' },
-    category: 'science',
-    grades: { ar: 'إعدادي وثانوي عام وأزهري', en: 'Prep & Secondary School' },
-    feePerSession: { ar: '90 ج.م / حصة', en: '90 EGP / Session' },
-    schedule: { ar: 'التلات والجمعة: 2 ظهراً - 6 مساءً', en: 'Tue & Fri: 2:00 PM - 6:00 PM' },
-    location: { ar: 'شارع البحر - منية سمنود', en: 'Canal Street - Minyat Samanoud' },
-    phone: '01055667788',
-    mode: { ar: 'تجارب عملية ومراجعات أسبوعية', en: 'Interactive Labs & Weekly Quizzes' }
-  },
-  {
-    id: 'tut-5',
-    villageId: 'kafr-saad',
-    teacherName: { ar: 'أستاذ طارق الفقي', en: 'Mr. Tarek El-Feki' },
-    subject: { ar: 'فيزياء وتطبيقات التكنولوجيا للثانوية', en: 'Physics & Applied Math' },
-    category: 'science',
-    grades: { ar: 'الأول والثاني والثالث الثانوي', en: 'High School Grades 10-12' },
-    feePerSession: { ar: '85 ج.م / حصة', en: '85 EGP / Session' },
-    schedule: { ar: 'السبت والاتنين والخميس: 5 م - 9 م', en: 'Sat, Mon, Thu: 5:00 PM - 9:00 PM' },
-    location: { ar: 'ميدان المحطة - كفر سعد', en: 'Station Square - Kafr Saad' },
-    phone: '01144559900',
-    mode: { ar: 'مجموعات متابعة مكثفة', en: 'Focused Study Groups' }
   }
 ];
 
@@ -1157,26 +1259,6 @@ export const VILLAGE_CHARITIES: CharityOrg[] = [
     address: { ar: 'الشارع العمومي - عمارة الوحدة المحلية', en: 'Main Street - Civic Building' },
     phone: '01188776655',
     donationExample: { ar: 'سهم علاج مريض 100 ج.م أو التطوع بالوقت', en: '100 EGP Patient Medicine Share or Volunteer' }
-  },
-  {
-    id: 'char-3',
-    villageId: 'minya',
-    name: { ar: 'جمعية البر والتقوى الخيرية - منية سمنود', en: 'Al-Birr Charity - Minyat Samanoud' },
-    focus: { ar: 'مساعدة الأسر المتعففة ومشاريع صغيرة للأرامل', en: 'Family assistance & micro-projects for widows' },
-    activeCampaign: { ar: 'توصيل وصلات ميه نظيفة وسقوف منازل لـ 12 بيت بالقرية', en: 'Clean water connections & roof repairs for 12 homes' },
-    address: { ar: 'أول شارع البحر - منية سمنود', en: 'Canal Road Entrance - Minyat Samanoud' },
-    phone: '01233445577',
-    donationExample: { ar: 'تبرع فوري أو تطوع ميداني', en: 'Direct donation or field volunteering' }
-  },
-  {
-    id: 'char-4',
-    villageId: 'kafr-saad',
-    name: { ar: 'لجنة زكاة وتكافل كفر سعد', en: 'Kafr Saad Zakat & Solidarity Committee' },
-    focus: { ar: 'مساعدات دراسية للطلاب ودعم الحالات الطارئة بالمستشفيات', en: 'Student tuition support & emergency hospital aid' },
-    activeCampaign: { ar: 'توفير كتب ومستلزمات دراسية لـ 80 طالب وطالبة', en: 'School supplies & tuition support for 80 students' },
-    address: { ar: 'ميدان المحطة - كفر سعد', en: 'Station Square - Kafr Saad' },
-    phone: '01077889944',
-    donationExample: { ar: 'كفالة شنطة مدرسية 180 ج.م', en: '180 EGP School Kit Sponsorship' }
   }
 ];
 
@@ -1213,16 +1295,5 @@ export const VILLAGE_OTHER_SERVICES: OtherService[] = [
     priceLabel: { ar: '35 ج.م / متر سجاد', en: '35 EGP / sq.meter' },
     hours: { ar: '9 ص - 8 م', en: '9 AM - 8 PM' },
     phone: '01244556677'
-  },
-  {
-    id: 'oth-4',
-    villageId: 'minya',
-    name: { ar: 'تأجير فراشة وكوش أفراح ومناسبات', en: 'Wedding & Event Tent Rentals' },
-    activityType: { ar: 'تجهيز أفراح، سرادقات ومناسبات', en: 'Event Staging & Sound Setup' },
-    description: { ar: 'كراسي، ترابيزات، إضاءة ليد وسماعات للمناسبات السعيدة والعزاء', en: 'Full seating, tents, lighting, and sound systems for village events' },
-    address: { ar: 'أول طريق منية سمنود', en: 'Minyat Samanoud Entrance' },
-    priceLabel: { ar: 'حسب التجهيز', en: 'Custom Quote' },
-    hours: { ar: '24 ساعة', en: '24/7 Service' },
-    phone: '01099887766'
   }
 ];

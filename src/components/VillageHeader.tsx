@@ -6,6 +6,7 @@ import {
   getVillageTheme
 } from '../data/villageData';
 import { TRANSLATIONS } from '../data/translations';
+import { VillageLogo } from './VillageLogo';
 import {
   Sun,
   Moon,
@@ -16,7 +17,6 @@ import {
   UserCheck,
   ShieldCheck,
   LogIn,
-  ChevronDown,
   Bell,
   Search,
   X,
@@ -48,8 +48,6 @@ interface VillageHeaderProps {
   onOpenEmergency: () => void;
   onOpenAssistant: () => void;
   activeVillage: VillageConfig;
-  villages: VillageConfig[];
-  onSwitchVillage: (villageId: string) => void;
   isSignedIn: boolean;
   isAdmin: boolean;
   userProfile: UserProfile | null;
@@ -75,8 +73,6 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
   onOpenEmergency,
   onOpenAssistant,
   activeVillage,
-  villages,
-  onSwitchVillage,
   isSignedIn,
   isAdmin,
   userProfile,
@@ -116,47 +112,15 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Top Row: Village Branding + Switcher + Desktop Search + Actions */}
         <div className="flex items-center justify-between gap-2.5 h-16">
-          {/* Zone 1: Village Name + Adjacent Village Switcher with Village Color Code */}
+          {/* Zone 1: Single Village Logo + Name (قرية نقباس) */}
           <div className="flex items-center gap-2 shrink-0 min-w-0">
             <button
               onClick={() => onTabChange('all')}
               className="flex items-center gap-2 text-base sm:text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0 cursor-pointer focus:outline-none"
             >
-              <span
-                className={`w-8 h-8 rounded-xl ${theme.solidBg} text-white flex items-center justify-center font-bold text-base shrink-0 transition-colors`}
-              >
-                {lang === 'ar' ? 'ن' : 'N'}
-              </span>
-              <span className="truncate max-w-[120px] sm:max-w-none">{brandName}</span>
+              <VillageLogo village={activeVillage} lang={lang} size="md" />
+              <span className="truncate max-w-[160px] sm:max-w-none">{brandName}</span>
             </button>
-
-            {/* Modular Village Switcher right next to Village Name */}
-            <div className="relative flex items-center shrink-0">
-              <span
-                className={`w-2.5 h-2.5 rounded-full ${theme.dotBg} pointer-events-none shrink-0 ${
-                  lang === 'ar' ? 'me-[-18px] z-10' : 'ms-2 -me-5 z-10'
-                }`}
-                aria-hidden="true"
-              />
-              <select
-                value={activeVillage.id}
-                onChange={(e) => onSwitchVillage(e.target.value)}
-                aria-label={t.switchVillage}
-                title={t.switchVillage}
-                className={`appearance-none text-xs font-bold rounded-xl border ${theme.border} ${theme.softBg} ${theme.text} py-1.5 cursor-pointer focus:outline-none whitespace-nowrap transition-colors ${
-                  lang === 'ar' ? 'pr-7 pl-6' : 'pl-7 pr-6'
-                }`}
-              >
-                {villages.map((v) => (
-                  <option key={v.id} value={v.id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                    {lang === 'ar' ? v.nameAr : v.nameEn}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                className={`w-3.5 h-3.5 ${theme.text} pointer-events-none -ms-5`}
-              />
-            </div>
           </div>
 
           {/* Zone 1.5: Relocated Inline Search Bar (Desktop lg+) */}

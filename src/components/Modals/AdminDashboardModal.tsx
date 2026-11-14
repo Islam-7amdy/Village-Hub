@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { doc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db, ADMIN_EMAIL, handleFirestoreError, OperationType } from '../../firebase';
 import {
   Language,
@@ -8,17 +8,20 @@ import {
   BookingRequest,
   PlatformPricingConfig,
   ProviderListing,
+  ReviewItem,
   VillageAd,
   VillageConfig,
   VillageColorCode,
+  VillageLogoIconId,
   VILLAGE_COLOR_THEMES,
+  VILLAGE_LOGO_PRESETS,
   getVillageTheme,
-  DEFAULT_DISTRICTS,
   normalizePhone,
   isBanCurrentlyActive,
   isAdExpired
 } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
+import { VillageLogo, renderVillageLogoGlyph } from '../VillageLogo';
 import {
   X,
   ShieldCheck,
@@ -27,8 +30,6 @@ import {
   MapPin,
   CheckCircle2,
   XCircle,
-  Plus,
-  RefreshCw,
   Phone,
   BarChart3,
   Users,
@@ -36,8 +37,19 @@ import {
   Ban,
   Search,
   DollarSign,
-  CalendarClock
+  CalendarClock,
+  Upload,
+  Star,
+  Truck,
+  TrendingUp,
+  Award,
+  Activity
 } from 'lucide-react';
+
+export type DemoUserAdminAction =
+  | { type: 'ban'; uid: string; banUntilMs: number; reason: string; isPermanent: boolean }
+  | { type: 'unban'; uid: string }
+  | { type: 'delete'; uid: string };
 
 interface AdminDashboardModalProps {
   isOpen: boolean;
@@ -48,13 +60,24 @@ interface AdminDashboardModalProps {
   users: UserProfile[];
   bannedPhones: BannedPhoneRecord[];
   bookings: BookingRequest[];
-  reviewsCount: number;
-  villages: VillageConfig[];
-  activeVillageId: string;
+  reviews: ReviewItem[];
+  serviceCounts: {
+    doctors: number;
+    pharmacy: number;
+    food: number;
+    technicians: number;
+    rides: number;
+    grocery: number;
+    tutoring: number;
+    charity: number;
+    other: number;
+  };
+  activeVillage: VillageConfig;
   adPricing: PlatformPricingConfig;
   nowMs: number;
-  onSwitchVillage: (villageId: string) => void;
-  onVillageAdded: (village: VillageConfig) => void;
+  onVillageUpdated: (village: VillageConfig) => void;
+  onDemoUserAction?: (action: DemoUserAdminAction) => void;
+  onDemoProviderDecision?: (providerId: string, decision: 'approved' | 'rejected') => void;
 }
 
 export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
@@ -66,17 +89,18 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   users,
   bannedPhones,
   bookings,
-  reviewsCount,
-  villages,
-  activeVillageId,
+  reviews,
+  serviceCounts,
+  activeVillage,
   adPricing,
   nowMs,
-  onSwitchVillage,
-  onVillageAdded
+  onVillageUpdated,
+  onDemoUserAction,
+  onDemoProviderDecision
 }) => {
   const t = TRANSLATIONS[lang];
   const [activeSection, setActiveSection] = useState<
-    'analytics' | 'users' | 'providers' | 'ads' | 'villages'
+    'analytics' | 'users' | 'providers' | 'ads' | 'village_settings'
   >('analytics');
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -92,14 +116,12 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [confirmDeleteUid, setConfirmDeleteUid] = useState<string | null>(null);
   const [userActionMsg, setUserActionMsg] = useState('');
 
-  // New Village Form state
-  const [newVillageId, setNewVillageId] = useState('');
-  const [newVillageNameAr, setNewVillageNameAr] = useState('');
-  const [newVillageNameEn, setNewVillageNameEn] = useState('');
-  const [newGovAr, setNewGovAr] = useState('');
-  const [newBaseFee, setNewBaseFee] = useState('10');
-  const [newPerKmFee, setNewPerKmFee] = useState('5');
-  const [newColorCode, setNewColorCode] = useState<VillageColorCode>('teal');
+  // Single-Village Settings Form state (قرية نقباس)
+  const [editBaseFee, setEditBaseFee] = useState(String(activeVillage.baseDeliveryFeeEgp));
+  const [editPerKmFee, setEditPerKmFee] = useState(String(activeVillage.perKmFeeEgp));
+  const [editColorCode, setEditColorCode] = useState<VillageColorCode>(activeVillage.colorCode || 'amber');
+  const [editLogoIcon, setEditLogoIcon] = useState<VillageLogoIconId>(activeVillage.logoIcon || 'wheat');
+  const [editLogoUrl, setEditLogoUrl] = useState(activeVillage.logoUrl || '');
   const [villageMsg, setVillageMsg] = useState('');
 
   useEffect(() => {
@@ -107,7 +129,15 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setMonthPrice(String(adPricing.adPriceMonthEgp));
   }, [adPricing.adPriceWeekEgp, adPricing.adPriceMonthEgp, isOpen]);
 
-  // Engaged / active users metrics
+  useEffect(() => {
+    setEditBaseFee(String(activeVillage.baseDeliveryFeeEgp ?? 10));
+    setEditPerKmFee(String(activeVillage.perKmFeeEgp ?? 5));
+    setEditColorCode(activeVillage.colorCode || 'amber');
+    setEditLogoIcon(activeVillage.logoIcon || 'wheat');
+    setEditLogoUrl(activeVillage.logoUrl || '');
+  }, [activeVillage, isOpen]);
+
+  // Comprehensive Platform Analytics for قرية نقباس
   const analyticsStats = useMemo(() => {
     const engagedKeys = new Set<string>();
     bookings.forEach((b) => {
@@ -130,30 +160,176 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       isBanCurrentlyActive(u.isBanned, u.banUntilMs)
     ).length;
 
+    const residentCount = users.filter((u) => u.role === 'resident').length;
+    const providerUsersCount = users.filter((u) => u.role === 'provider').length;
+    const engagementRate =
+      users.length > 0 ? Math.min(100, Math.round((engagedKeys.size / users.length) * 100)) : 0;
+
     const approvedProvidersCount = providers.filter((p) => p.status === 'approved').length;
+    const pendingProvidersCountLocal = providers.filter((p) => p.status === 'pending').length;
+    const rejectedProvidersCount = providers.filter((p) => p.status === 'rejected').length;
+    const providerApprovalRate =
+      providers.length > 0 ? Math.round((approvedProvidersCount / providers.length) * 100) : 0;
+
     const activeAdsList = ads.filter(
       (a) => a.status === 'approved' && !isAdExpired(a.expiresAtMs, nowMs)
     );
     const expiredAdsList = ads.filter(
       (a) => a.status === 'approved' && isAdExpired(a.expiresAtMs, nowMs)
     );
+    const pendingAdsList = ads.filter((a) => a.status === 'pending');
+    const weeklyAdsCount = ads.filter((a) => (a.durationPlan || 'week') === 'week').length;
+    const monthlyAdsCount = ads.filter((a) => a.durationPlan === 'month').length;
+    const adApprovalRate =
+      ads.length > 0
+        ? Math.round((ads.filter((a) => a.status === 'approved').length / ads.length) * 100)
+        : 0;
+
     const adRevenueEgp = ads
       .filter((a) => a.status === 'approved')
       .reduce((sum, a) => sum + (a.costEgp || 0), 0);
+
     const bookingsVolumeEgp = bookings.reduce((sum, b) => sum + (b.totalAmountEgp || 0), 0);
+    const avgOrderEgp =
+      bookings.length > 0 ? Math.round(bookingsVolumeEgp / bookings.length) : 0;
+    const confirmedBookingsCount = bookings.filter((b) => b.status === 'confirmed' || b.status === 'completed').length;
+
+    const deliveryBookings = bookings.filter((b) => typeof b.deliveryFeeEgp === 'number' || typeof b.distanceKm === 'number');
+    const deliveryFeesTotalEgp = bookings.reduce((sum, b) => sum + (b.deliveryFeeEgp || 0), 0);
+    const avgDistanceKm =
+      deliveryBookings.length > 0
+        ? (
+            deliveryBookings.reduce((sum, b) => sum + (b.distanceKm || 0), 0) /
+            deliveryBookings.length
+          ).toFixed(1)
+        : '0.0';
+
+    const avgRating =
+      reviews.length > 0
+        ? (reviews.reduce((sum, r) => sum + (r.rating || 5), 0) / reviews.length).toFixed(1)
+        : '5.0';
+    const verifiedReviewsCount = reviews.filter((r) => r.isVerifiedResident).length;
+
+    const permBansCount = bannedPhones.filter((b) => b.isPermanent).length;
+    const timedBansCount = bannedPhones.length - permBansCount;
+
+    const totalGmvEgp = bookingsVolumeEgp + adRevenueEgp;
+
+    const categoryBreakdown = [
+      {
+        id: 'doctors',
+        labelAr: 'أطباء وعيادات',
+        labelEn: 'Doctors & Clinics',
+        listings: serviceCounts.doctors,
+        bookings: bookings.filter((b) => b.serviceType === 'doctor').length,
+        color: 'bg-rose-500'
+      },
+      {
+        id: 'pharmacy',
+        labelAr: 'صيدليات',
+        labelEn: 'Pharmacies',
+        listings: serviceCounts.pharmacy,
+        bookings: bookings.filter((b) => b.serviceType === 'pharmacy').length,
+        color: 'bg-emerald-500'
+      },
+      {
+        id: 'food',
+        labelAr: 'مطاعم وأكل بيتي',
+        labelEn: 'Food & Bakery',
+        listings: serviceCounts.food,
+        bookings: bookings.filter((b) => b.serviceType === 'food').length,
+        color: 'bg-orange-500'
+      },
+      {
+        id: 'technicians',
+        labelAr: 'فنيون وحرفيون',
+        labelEn: 'Technicians',
+        listings: serviceCounts.technicians,
+        bookings: bookings.filter((b) => b.serviceType === 'technician').length,
+        color: 'bg-amber-500'
+      },
+      {
+        id: 'rides',
+        labelAr: 'مواصلات وتوصيل',
+        labelEn: 'Rides & Transit',
+        listings: serviceCounts.rides,
+        bookings: bookings.filter((b) => b.serviceType === 'ride').length,
+        color: 'bg-sky-500'
+      },
+      {
+        id: 'grocery',
+        labelAr: 'بقالة وسوبر ماركت',
+        labelEn: 'Grocery & Market',
+        listings: serviceCounts.grocery,
+        bookings: bookings.filter((b) => b.serviceType === 'grocery' || b.serviceType === 'farm').length,
+        color: 'bg-lime-500'
+      },
+      {
+        id: 'tutoring',
+        labelAr: 'دروس ومعلمون',
+        labelEn: 'Tutoring',
+        listings: serviceCounts.tutoring,
+        bookings: bookings.filter((b) => b.serviceType === 'tutoring').length,
+        color: 'bg-indigo-500'
+      },
+      {
+        id: 'charity',
+        labelAr: 'جمعيات خيرية',
+        labelEn: 'Charities',
+        listings: serviceCounts.charity,
+        bookings: bookings.filter((b) => b.serviceType === 'charity').length,
+        color: 'bg-teal-500'
+      },
+      {
+        id: 'other',
+        labelAr: 'خدمات أخرى',
+        labelEn: 'Other Services',
+        listings: serviceCounts.other,
+        bookings: bookings.filter((b) => b.serviceType === 'other').length,
+        color: 'bg-purple-500'
+      }
+    ];
+
+    const maxCategoryWeight = Math.max(
+      1,
+      ...categoryBreakdown.map((c) => c.listings + c.bookings)
+    );
 
     return {
       totalUsers: users.length,
+      residentCount,
+      providerUsersCount,
       engagedCount: engagedKeys.size,
+      engagementRate,
       activeBannedCount,
       approvedProvidersCount,
+      pendingProvidersCount: pendingProvidersCountLocal,
+      rejectedProvidersCount,
+      providerApprovalRate,
       activeAdsCount: activeAdsList.length,
+      pendingAdsCount: pendingAdsList.length,
       expiredAdsCount: expiredAdsList.length,
+      weeklyAdsCount,
+      monthlyAdsCount,
+      adApprovalRate,
       adRevenueEgp,
       bookingsCount: bookings.length,
-      bookingsVolumeEgp
+      confirmedBookingsCount,
+      bookingsVolumeEgp,
+      avgOrderEgp,
+      deliveryOrdersCount: deliveryBookings.length,
+      deliveryFeesTotalEgp,
+      avgDistanceKm,
+      reviewsCount: reviews.length,
+      avgRating,
+      verifiedReviewsCount,
+      permBansCount,
+      timedBansCount,
+      totalGmvEgp,
+      categoryBreakdown,
+      maxCategoryWeight
     };
-  }, [users, bookings, ads, providers, nowMs]);
+  }, [users, bookings, ads, providers, reviews, bannedPhones, serviceCounts, nowMs]);
 
   if (!isOpen) return null;
 
@@ -179,7 +355,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     try {
       try {
         await setDoc(doc(db, 'appConfig', 'settings'), {
-          activeVillageId,
+          activeVillageId: 'noqbas',
           adPriceWeekEgp: w,
           adPriceMonthEgp: m,
           updatedAt: serverTimestamp()
@@ -219,6 +395,23 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
     setBusyId(`ban-${user.uid}`);
     try {
+      if (user.uid.startsWith('test-')) {
+        onDemoUserAction?.({
+          type: 'ban',
+          uid: user.uid,
+          banUntilMs,
+          reason,
+          isPermanent
+        });
+        setUserActionMsg(
+          lang === 'ar'
+            ? `تم حظر حساب التجربة ${user.displayName} (${normalized}).`
+            : `Banned test user ${user.displayName} (${normalized}).`
+        );
+        setTimeout(() => setUserActionMsg(''), 3000);
+        return;
+      }
+
       try {
         await setDoc(doc(db, 'bannedPhones', normalized), {
           phone: normalized,
@@ -259,6 +452,15 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     const normalized = normalizePhone(phoneRaw);
     setBusyId(`unban-${uid || normalized}`);
     try {
+      if (uid?.startsWith('test-')) {
+        onDemoUserAction?.({ type: 'unban', uid });
+        setUserActionMsg(
+          lang === 'ar' ? `تم فك الحظر عن ${normalized}` : `Unbanned ${normalized}`
+        );
+        setTimeout(() => setUserActionMsg(''), 2500);
+        return;
+      }
+
       if (normalized && normalized.length >= 8) {
         try {
           await deleteDoc(doc(db, 'bannedPhones', normalized));
@@ -291,6 +493,16 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     if (user.email === ADMIN_EMAIL) return;
     setBusyId(`del-${user.uid}`);
     try {
+      if (user.uid.startsWith('test-')) {
+        onDemoUserAction?.({ type: 'delete', uid: user.uid });
+        setConfirmDeleteUid(null);
+        setUserActionMsg(
+          lang === 'ar' ? `تم حذف حساب التجربة ${user.displayName}.` : `Deleted test account ${user.displayName}.`
+        );
+        setTimeout(() => setUserActionMsg(''), 2500);
+        return;
+      }
+
       try {
         await deleteDoc(doc(db, 'users', user.uid));
       } catch (err) {
@@ -319,6 +531,11 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const handleProviderDecision = async (provider: ProviderListing, decision: 'approved' | 'rejected') => {
     setBusyId(provider.id);
     try {
+      if (provider.id.startsWith('test-')) {
+        onDemoProviderDecision?.(provider.id, decision);
+        return;
+      }
+
       try {
         await updateDoc(doc(db, 'providers', provider.id), {
           status: decision,
@@ -362,74 +579,111 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     }
   };
 
-  const handleSwitchActiveVillage = async (vid: string) => {
-    setBusyId(vid);
+  const compressLogoFile = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new window.Image();
+        img.onload = () => {
+          const maxSide = 160;
+          const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Canvas unavailable'));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, w, h);
+          let dataUrl = canvas.toDataURL('image/webp', 0.82);
+          if (dataUrl.length > 40000) {
+            dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+          }
+          if (dataUrl.length > 43000) {
+            reject(new Error('Image too large'));
+            return;
+          }
+          resolve(dataUrl);
+        };
+        img.onerror = () => reject(new Error('Invalid image'));
+        img.src = String(reader.result || '');
+      };
+      reader.onerror = () => reject(new Error('Read failed'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleUploadNoqbasLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
     try {
-      onSwitchVillage(vid);
-      try {
-        await setDoc(doc(db, 'appConfig', 'settings'), {
-          activeVillageId: vid,
-          adPriceWeekEgp: adPricing.adPriceWeekEgp,
-          adPriceMonthEgp: adPricing.adPriceMonthEgp,
-          updatedAt: serverTimestamp()
-        });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, 'appConfig/settings');
-      }
-    } finally {
-      setBusyId(null);
+      const compressed = await compressLogoFile(file);
+      setEditLogoUrl(compressed);
+    } catch {
+      setVillageMsg(
+        lang === 'ar'
+          ? 'حجم اللوجو كبير أوي، جرب صورة أصغر.'
+          : 'Logo image is too large, try a smaller image.'
+      );
+      setTimeout(() => setVillageMsg(''), 3000);
     }
   };
 
-  const handleAddVillage = async (e: React.FormEvent) => {
+  const handleSaveNoqbasSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    const slug = (newVillageId.trim() || newVillageNameEn.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'))
-      .replace(/^-+|-+$/g, '') || `village-${Date.now()}`;
-
-    if (!newVillageNameAr.trim() || !newVillageNameEn.trim()) return;
-
-    setBusyId('add-village');
+    setBusyId('save-noqbas');
     try {
-      const villageData: VillageConfig = {
-        id: slug,
-        nameAr: newVillageNameAr.trim(),
-        nameEn: newVillageNameEn.trim(),
-        governorateAr: newGovAr.trim() || 'مصر',
-        governorateEn: newGovAr.trim() || 'Egypt',
-        descriptionAr: `خدمات أهالي ${newVillageNameAr.trim()} الموحدة`,
-        descriptionEn: `Unified community services for ${newVillageNameEn.trim()}`,
-        baseDeliveryFeeEgp: Number(newBaseFee) || 10,
-        perKmFeeEgp: Number(newPerKmFee) || 5,
-        colorCode: newColorCode,
-        isActive: true,
-        districts: DEFAULT_DISTRICTS
+      const updatedVillage: VillageConfig = {
+        ...activeVillage,
+        id: 'noqbas',
+        nameAr: 'قرية نقباس',
+        nameEn: 'Noqbas Village',
+        baseDeliveryFeeEgp: Math.max(0, Number(editBaseFee) || 0),
+        perKmFeeEgp: Math.max(0, Number(editPerKmFee) || 0),
+        colorCode: editColorCode,
+        logoIcon: editLogoIcon,
+        logoUrl: editLogoUrl,
+        isActive: true
+      };
+
+      const vRef = doc(db, 'villages', 'noqbas');
+      const snap = await getDoc(vRef);
+      const payload = {
+        id: updatedVillage.id,
+        nameAr: updatedVillage.nameAr,
+        nameEn: updatedVillage.nameEn,
+        governorateAr: updatedVillage.governorateAr || 'مركز بنها - القليوبية',
+        governorateEn: updatedVillage.governorateEn || 'Banha - Qalyubia',
+        descriptionAr: updatedVillage.descriptionAr || '',
+        descriptionEn: updatedVillage.descriptionEn || '',
+        baseDeliveryFeeEgp: updatedVillage.baseDeliveryFeeEgp,
+        perKmFeeEgp: updatedVillage.perKmFeeEgp,
+        colorCode: updatedVillage.colorCode,
+        logoIcon: updatedVillage.logoIcon,
+        logoUrl: updatedVillage.logoUrl || '',
+        isActive: true
       };
 
       try {
-        await setDoc(doc(db, 'villages', slug), {
-          id: villageData.id,
-          nameAr: villageData.nameAr,
-          nameEn: villageData.nameEn,
-          governorateAr: villageData.governorateAr,
-          governorateEn: villageData.governorateEn,
-          descriptionAr: villageData.descriptionAr,
-          descriptionEn: villageData.descriptionEn,
-          baseDeliveryFeeEgp: villageData.baseDeliveryFeeEgp,
-          perKmFeeEgp: villageData.perKmFeeEgp,
-          colorCode: villageData.colorCode,
-          isActive: true,
-          createdAt: serverTimestamp()
-        });
+        if (snap.exists()) {
+          await updateDoc(vRef, payload);
+        } else {
+          await setDoc(vRef, {
+            ...payload,
+            createdAt: serverTimestamp()
+          });
+        }
       } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `villages/${slug}`);
+        handleFirestoreError(err, OperationType.WRITE, 'villages/noqbas');
       }
 
-      onVillageAdded(villageData);
-      setNewVillageId('');
-      setNewVillageNameAr('');
-      setNewVillageNameEn('');
-      setNewGovAr('');
-      setVillageMsg(lang === 'ar' ? 'تمت إضافة القرية بنجاح وتقدر تبدل عليها دلوقتي!' : 'Village added!');
+      onVillageUpdated(updatedVillage);
+      setVillageMsg(
+        lang === 'ar' ? 'تم حفظ إعدادات ولوجو قرية نقباس بنجاح ✓' : 'Noqbas Village settings saved ✓'
+      );
       setTimeout(() => setVillageMsg(''), 2500);
     } finally {
       setBusyId(null);
@@ -524,145 +778,347 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveSection('villages')}
+            onClick={() => setActiveSection('village_settings')}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors ${
-              activeSection === 'villages'
+              activeSection === 'village_settings'
                 ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <MapPin className="w-4 h-4" />
-            <span>{lang === 'ar' ? 'إدارة القرى' : 'Villages'}</span>
+            <span>{lang === 'ar' ? 'إعدادات قرية نقباس' : 'Noqbas Settings'}</span>
           </button>
         </div>
 
         {/* Tab Body */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6 text-xs">
-          {/* TAB 0: ANALYTICS */}
+          {/* TAB 0: EXTENSIVE ANALYTICS */}
           {activeSection === 'analytics' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30">
-                  <div className="text-[11px] font-semibold text-slate-500">
-                    {lang === 'ar' ? 'المستخدمين المسجلين' : 'Registered Users'}
+              {/* Row 1: Primary 4 KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>{lang === 'ar' ? 'إجمالي الحسابات المسجلة' : 'Registered Users'}</span>
+                    <Users className="w-4 h-4 text-slate-400" />
                   </div>
-                  <div className="text-2xl font-extrabold font-mono text-slate-900 dark:text-white mt-1">
+                  <div className="text-2xl font-extrabold font-mono text-slate-900 dark:text-white">
                     {analyticsStats.totalUsers}
                   </div>
-                  <div className="text-[11px] text-rose-600 font-semibold mt-1">
-                    {lang === 'ar'
-                      ? `${analyticsStats.activeBannedCount} محظور`
-                      : `${analyticsStats.activeBannedCount} banned`}
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                    <span>{analyticsStats.residentCount} {lang === 'ar' ? 'مستخدم' : 'users'}</span>
+                    <span>·</span>
+                    <span>{analyticsStats.providerUsersCount} {lang === 'ar' ? 'مقدم خدمة' : 'providers'}</span>
+                    {analyticsStats.activeBannedCount > 0 && (
+                      <span className="text-rose-600 font-bold">· {analyticsStats.activeBannedCount} {lang === 'ar' ? 'محظور' : 'banned'}</span>
+                    )}
                   </div>
                 </div>
 
-                <div className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/30">
-                  <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                    {lang === 'ar' ? 'عدد المتفاعلين على المنصة' : 'Active Engaged Users'}
+                <div className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/30 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                    <span>{lang === 'ar' ? 'المتفاعلين ونسبة النشاط' : 'Engaged Users & Rate'}</span>
+                    <Activity className="w-4 h-4 text-emerald-600" />
                   </div>
-                  <div className="text-2xl font-extrabold font-mono text-emerald-700 dark:text-emerald-300 mt-1">
-                    {analyticsStats.engagedCount}
-                  </div>
-                  <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                    {lang === 'ar' ? 'حجوزات + إعلانات + خدمات' : 'Bookings + Ads + Providers'}
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30">
-                  <div className="text-[11px] font-semibold text-slate-500">
-                    {lang === 'ar' ? 'الحجوزات والطلبات' : 'Bookings & Orders'}
-                  </div>
-                  <div className="text-2xl font-extrabold font-mono text-slate-900 dark:text-white mt-1">
-                    {analyticsStats.bookingsCount}
-                  </div>
-                  <div className="text-[11px] font-mono text-emerald-600 font-bold mt-1">
-                    {analyticsStats.bookingsVolumeEgp.toLocaleString()} {t.currency}
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/30">
-                  <div className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">
-                    {lang === 'ar' ? 'الإعلانات السارية / العائد' : 'Active Ads / Revenue'}
-                  </div>
-                  <div className="text-2xl font-extrabold font-mono text-amber-700 dark:text-amber-300 mt-1">
-                    {analyticsStats.activeAdsCount}
-                    <span className="text-xs font-normal text-slate-500 ms-1.5">
-                      ({analyticsStats.expiredAdsCount} {lang === 'ar' ? 'منتهي' : 'exp'})
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-extrabold font-mono text-emerald-700 dark:text-emerald-300">
+                      {analyticsStats.engagedCount}
+                    </span>
+                    <span className="text-xs font-mono font-bold text-emerald-600">
+                      ({analyticsStats.engagementRate}%)
                     </span>
                   </div>
-                  <div className="text-[11px] font-mono text-amber-700 dark:text-amber-400 font-bold mt-1">
-                    {analyticsStats.adRevenueEgp.toLocaleString()} {t.currency}
+                  <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                    {lang === 'ar' ? 'تفاعل عبر الطلبات والإعلانات والخدمات' : 'Orders, ads & services activity'}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/50 dark:bg-sky-950/25 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-sky-800 dark:text-sky-300">
+                    <span>{lang === 'ar' ? 'الطلبات وحجم التعاملات' : 'Orders & Volume'}</span>
+                    <TrendingUp className="w-4 h-4 text-sky-600" />
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-extrabold font-mono text-slate-900 dark:text-white">
+                      {analyticsStats.bookingsCount}
+                    </span>
+                    <span className="text-[11px] text-emerald-600 font-bold">
+                      ({analyticsStats.confirmedBookingsCount} {lang === 'ar' ? 'مؤكد' : 'conf.'})
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-mono text-sky-700 dark:text-sky-400 font-bold">
+                    {analyticsStats.bookingsVolumeEgp.toLocaleString()} {t.currency} · {lang === 'ar' ? 'متوسط' : 'Avg'} {analyticsStats.avgOrderEgp} {t.currency}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/30 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                    <span>{lang === 'ar' ? 'الإعلانات السارية وعائدها' : 'Active Ads & Revenue'}</span>
+                    <Megaphone className="w-4 h-4 text-amber-600" />
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-extrabold font-mono text-amber-700 dark:text-amber-300">
+                      {analyticsStats.activeAdsCount}
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      {analyticsStats.pendingAdsCount} {lang === 'ar' ? 'مراجعة' : 'pend.'} · {analyticsStats.expiredAdsCount} {lang === 'ar' ? 'منتهي' : 'exp.'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-mono text-amber-700 dark:text-amber-400 font-bold">
+                    {analyticsStats.adRevenueEgp.toLocaleString()} {t.currency} ({analyticsStats.adApprovalRate}% {lang === 'ar' ? 'قبول' : 'appr.'})
                   </div>
                 </div>
               </div>
 
-              {/* Extra Summary Metrics */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                  <span className="font-semibold text-slate-600 dark:text-slate-300">
-                    {lang === 'ar' ? 'مقدمي الخدمات المعتمدين' : 'Approved Providers'}
-                  </span>
-                  <span className="text-lg font-extrabold font-mono text-slate-900 dark:text-white">
-                    {analyticsStats.approvedProvidersCount}
-                  </span>
+              {/* Row 2: 4 Deep Operational KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>{lang === 'ar' ? 'مقدمي الخدمات المسجلين' : 'Service Providers'}</span>
+                    <Briefcase className="w-3.5 h-3.5 text-amber-600" />
+                  </div>
+                  <div className="text-lg font-extrabold font-mono text-slate-900 dark:text-white">
+                    {analyticsStats.approvedProvidersCount} / {providers.length}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {analyticsStats.pendingProvidersCount} {lang === 'ar' ? 'مراجعة' : 'pend'} · {analyticsStats.rejectedProvidersCount} {lang === 'ar' ? 'مرفوض' : 'rej'} · {analyticsStats.providerApprovalRate}%
+                  </div>
                 </div>
-                <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                  <span className="font-semibold text-slate-600 dark:text-slate-300">
-                    {lang === 'ar' ? 'إجمالي التقييمات والمراجعات' : 'Total Reviews'}
-                  </span>
-                  <span className="text-lg font-extrabold font-mono text-slate-900 dark:text-white">
-                    {reviewsCount}
-                  </span>
+
+                <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>{lang === 'ar' ? 'التوصيل والمسافات' : 'Delivery Analytics'}</span>
+                    <Truck className="w-3.5 h-3.5 text-sky-600" />
+                  </div>
+                  <div className="text-lg font-extrabold font-mono text-slate-900 dark:text-white">
+                    {analyticsStats.deliveryFeesTotalEgp.toLocaleString()} {t.currency}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {analyticsStats.deliveryOrdersCount} {lang === 'ar' ? 'طلب توصيل' : 'deliveries'} · {lang === 'ar' ? 'متوسط' : 'Avg'} {analyticsStats.avgDistanceKm} {lang === 'ar' ? 'كم' : 'km'}
+                  </div>
                 </div>
-                <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                  <span className="font-semibold text-slate-600 dark:text-slate-300">
-                    {lang === 'ar' ? 'الأرقام المحظورة' : 'Banned Phone Numbers'}
-                  </span>
-                  <span className="text-lg font-extrabold font-mono text-rose-600">
-                    {bannedPhones.length}
-                  </span>
+
+                <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>{lang === 'ar' ? 'التقييمات وجودة الخدمة' : 'Reviews & Quality'}</span>
+                    <Star className="w-3.5 h-3.5 text-amber-500" />
+                  </div>
+                  <div className="text-lg font-extrabold font-mono text-slate-900 dark:text-white">
+                    ★ {analyticsStats.avgRating} <span className="text-xs font-normal text-slate-500">({analyticsStats.reviewsCount})</span>
+                  </div>
+                  <div className="text-[11px] text-emerald-600 font-semibold">
+                    {analyticsStats.verifiedReviewsCount} {lang === 'ar' ? 'تقييم موثق من أهالي نقباس' : 'verified resident reviews'}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>{lang === 'ar' ? 'سجل الأمان والحظر' : 'Moderation & Bans'}</span>
+                    <Ban className="w-3.5 h-3.5 text-rose-500" />
+                  </div>
+                  <div className="text-lg font-extrabold font-mono text-rose-600">
+                    {bannedPhones.length} <span className="text-xs font-normal text-slate-500">{lang === 'ar' ? 'رقم محظور' : 'phones'}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {analyticsStats.timedBansCount} {lang === 'ar' ? 'مؤقت' : 'timed'} · {analyticsStats.permBansCount} {lang === 'ar' ? 'دائم' : 'perm'}
+                  </div>
                 </div>
               </div>
 
-              {/* Per Village Breakdown Table */}
+              {/* Row 3: Service Categories Distribution + Ads & Top Providers */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Category Breakdown Bars */}
+                <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                      {lang === 'ar' ? 'توزيع الخدمات والطلبات حسب القسم — نقباس' : 'Noqbas Activity by Category'}
+                    </h4>
+                    <span className="text-[11px] text-slate-500">
+                      {lang === 'ar' ? 'مقدمي خدمة + طلبات' : 'Listings + Orders'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {analyticsStats.categoryBreakdown.map((cat) => {
+                      const totalWeight = cat.listings + cat.bookings;
+                      const pct = Math.max(6, Math.round((totalWeight / analyticsStats.maxCategoryWeight) * 100));
+                      return (
+                        <div key={cat.id} className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                              {lang === 'ar' ? cat.labelAr : cat.labelEn}
+                            </span>
+                            <span className="font-mono text-slate-600 dark:text-slate-400">
+                              {cat.listings} {lang === 'ar' ? 'خدمة' : 'items'} · {cat.bookings} {lang === 'ar' ? 'طلب' : 'orders'}
+                            </span>
+                          </div>
+                          <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${cat.color} transition-all`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Ads Plan Analytics & Top Providers */}
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 space-y-3">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <DollarSign className="w-4 h-4 text-amber-600" />
+                      <span>{lang === 'ar' ? 'تحليل الإعلانات وإجمالي القيمة المالية' : 'Ads Plans & Financial Summary'}</span>
+                    </h4>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                        <div className="text-[11px] text-slate-500">{lang === 'ar' ? 'باقة الأسبوع' : 'Weekly Ads'}</div>
+                        <div className="text-base font-extrabold font-mono text-slate-900 dark:text-white mt-0.5">
+                          {analyticsStats.weeklyAdsCount}
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                        <div className="text-[11px] text-slate-500">{lang === 'ar' ? 'باقة الشهر' : 'Monthly Ads'}</div>
+                        <div className="text-base font-extrabold font-mono text-slate-900 dark:text-white mt-0.5">
+                          {analyticsStats.monthlyAdsCount}
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
+                        <div className="text-[11px] text-emerald-700 dark:text-emerald-400">{lang === 'ar' ? 'إجمالي الحركة' : 'Total GMV'}</div>
+                        <div className="text-base font-extrabold font-mono text-emerald-700 dark:text-emerald-300 mt-0.5">
+                          {analyticsStats.totalGmvEgp.toLocaleString()} {t.currency}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Registered Providers Snapshot */}
+                  <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 space-y-2.5">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Award className="w-4 h-4 text-amber-600" />
+                      <span>{lang === 'ar' ? 'مقدمي الخدمات في قرية نقباس' : 'Registered Noqbas Providers'}</span>
+                    </h4>
+                    {providers.length === 0 ? (
+                      <div className="text-slate-400 py-3 text-center">
+                        {lang === 'ar' ? 'لا يوجد مقدمي خدمات مسجلين بعد.' : 'No providers registered yet.'}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {providers.slice(0, 5).map((p) => (
+                          <div
+                            key={p.id}
+                            className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 dark:text-white truncate">
+                                {lang === 'ar' ? p.nameAr : p.nameEn}
+                              </div>
+                              <div className="text-[11px] text-slate-500 truncate">
+                                {lang === 'ar' ? p.specialtyAr : p.specialtyEn}
+                              </div>
+                            </div>
+                            <span
+                              className={`text-[11px] font-bold shrink-0 ${
+                                p.status === 'approved'
+                                  ? 'text-emerald-600'
+                                  : p.status === 'rejected'
+                                  ? 'text-rose-600'
+                                  : 'text-amber-600'
+                              }`}
+                            >
+                              {p.status === 'approved'
+                                ? lang === 'ar'
+                                  ? 'مفعل'
+                                  : 'Approved'
+                                : p.status === 'rejected'
+                                ? lang === 'ar'
+                                  ? 'مرفوض'
+                                  : 'Rejected'
+                                : lang === 'ar'
+                                ? 'مراجعة'
+                                : 'Pending'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 4: Latest Orders & Bookings Table */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
-                <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/60 font-bold text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800">
-                  {lang === 'ar' ? 'توزيع النشاط حسب القرية' : 'Activity Breakdown by Village'}
+                <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/60 font-bold text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <span>{lang === 'ar' ? 'أحدث الطلبات والحجوزات في نقباس' : 'Latest Noqbas Bookings & Orders'}</span>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    {bookings.length} {lang === 'ar' ? 'سجل' : 'total'}
+                  </span>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-start text-xs">
-                    <thead className="bg-slate-50/50 dark:bg-slate-900/50 text-slate-500 border-b border-slate-100 dark:border-slate-800">
-                      <tr>
-                        <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'القرية' : 'Village'}</th>
-                        <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'المستخدمين' : 'Users'}</th>
-                        <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'مقدمي الخدمات' : 'Providers'}</th>
-                        <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'الإعلانات' : 'Ads'}</th>
-                        <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'الطلبات' : 'Bookings'}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {villages.map((v) => {
-                        const vUsers = users.filter((u) => u.villageId === v.id).length;
-                        const vProvs = providers.filter((p) => p.villageId === v.id).length;
-                        const vAds = ads.filter((a) => a.villageId === v.id).length;
-                        const vBooks = bookings.filter((b) => b.villageId === v.id).length;
-                        const vTheme = getVillageTheme(v.colorCode);
-                        return (
-                          <tr key={v.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
-                            <td className="px-4 py-2.5 font-bold flex items-center gap-2">
-                              <span className={`w-2.5 h-2.5 rounded-full ${vTheme.dotBg}`} />
-                              <span>{lang === 'ar' ? v.nameAr : v.nameEn}</span>
+                {bookings.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400">
+                    {lang === 'ar' ? 'لا توجد طلبات مسجلة حتى الآن.' : 'No orders recorded yet.'}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-start text-xs">
+                      <thead className="bg-slate-50/50 dark:bg-slate-900/50 text-slate-500 border-b border-slate-100 dark:border-slate-800">
+                        <tr>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'العميل' : 'Customer'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'الخدمة / الطلب' : 'Service / Order'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'مقدم الخدمة' : 'Provider'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'التاريخ' : 'Date'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'القيمة' : 'Amount'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'الحالة' : 'Status'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {bookings.slice(0, 8).map((b) => (
+                          <tr key={b.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                            <td className="px-4 py-2.5 font-bold text-slate-900 dark:text-white">
+                              {b.customerName}
                             </td>
-                            <td className="px-4 py-2.5 font-mono">{vUsers}</td>
-                            <td className="px-4 py-2.5 font-mono">{vProvs}</td>
-                            <td className="px-4 py-2.5 font-mono">{vAds}</td>
-                            <td className="px-4 py-2.5 font-mono">{vBooks}</td>
+                            <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300 max-w-[200px] truncate">
+                              {b.title}
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-500">{b.providerName}</td>
+                            <td className="px-4 py-2.5 font-mono text-slate-500">{b.date}</td>
+                            <td className="px-4 py-2.5 font-mono font-bold text-emerald-600">
+                              {b.totalAmountEgp ? `${b.totalAmountEgp} ${t.currency}` : '—'}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span
+                                className={`font-bold ${
+                                  b.status === 'confirmed' || b.status === 'completed'
+                                    ? 'text-emerald-600'
+                                    : b.status === 'cancelled'
+                                    ? 'text-rose-600'
+                                    : 'text-amber-600'
+                                }`}
+                              >
+                                {b.status === 'confirmed'
+                                  ? lang === 'ar'
+                                    ? 'مؤكد'
+                                    : 'Confirmed'
+                                  : b.status === 'completed'
+                                  ? lang === 'ar'
+                                    ? 'مكتمل'
+                                    : 'Completed'
+                                  : b.status === 'cancelled'
+                                  ? lang === 'ar'
+                                    ? 'ملغي'
+                                    : 'Cancelled'
+                                  : lang === 'ar'
+                                  ? 'قيد الانتظار'
+                                  : 'Pending'}
+                              </span>
+                            </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1148,196 +1604,176 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
             </div>
           )}
 
-          {/* TAB 4: VILLAGES SWITCHER & MODULAR CREATOR */}
-          {activeSection === 'villages' && (
-            <div className="space-y-6">
-              <div className="space-y-3">
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                  {lang === 'ar' ? 'التبديل السريع بين القرى (Modular Villages)' : 'Switch Active Village'}
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {villages.map((v) => {
-                    const isCurrent = v.id === activeVillageId;
-                    const vTheme = getVillageTheme(v.colorCode);
+          {/* TAB 4: SINGLE VILLAGE SETTINGS (قرية نقباس) */}
+          {activeSection === 'village_settings' && (
+            <form
+              onSubmit={handleSaveNoqbasSettings}
+              className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <VillageLogo
+                    village={{
+                      nameAr: 'قرية نقباس',
+                      nameEn: 'Noqbas Village',
+                      colorCode: editColorCode,
+                      logoIcon: editLogoIcon,
+                      logoUrl: editLogoUrl
+                    }}
+                    lang={lang}
+                    size="lg"
+                  />
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                      {lang === 'ar' ? 'إعدادات ولوجو قرية نقباس' : 'Noqbas Village Branding & Settings'}
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      {lang === 'ar'
+                        ? 'المنصة مخصصة بالكامل لقرية نقباس — تقدر تغير اللوجو، اللون المميز، وأسعار التوصيل.'
+                        : 'Single-village platform for Noqbas — customize logo, accent color, and delivery rates.'}
+                    </p>
+                  </div>
+                </div>
+                {villageMsg && (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">{villageMsg}</span>
+                )}
+              </div>
+
+              {/* Color Code Picker */}
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  {lang === 'ar' ? 'اللون المميز للمنصة (Color Code)' : 'Platform Accent Color'}
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {(Object.keys(VILLAGE_COLOR_THEMES) as VillageColorCode[]).map((code) => {
+                    const themeObj = VILLAGE_COLOR_THEMES[code];
+                    const selected = editColorCode === code;
                     return (
-                      <div
-                        key={v.id}
-                        className={`p-4 rounded-2xl border transition-all flex flex-col justify-between space-y-3 ${
-                          isCurrent
-                            ? `${vTheme.border} ${vTheme.softBg}`
-                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                      <button
+                        key={code}
+                        type="button"
+                        onClick={() => setEditColorCode(code)}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                          selected
+                            ? `${themeObj.border} ${themeObj.softBg} ${themeObj.text}`
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
                         }`}
                       >
-                        <div>
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`w-3 h-3 rounded-full ${vTheme.dotBg} shrink-0`} />
-                              <span className="font-bold text-sm text-slate-900 dark:text-white">
-                                {lang === 'ar' ? v.nameAr : v.nameEn}
-                              </span>
-                            </div>
-                            <span className={`text-[10px] font-bold ${vTheme.text}`}>
-                              {vTheme.label[lang]}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            {lang === 'ar' ? v.governorateAr : v.governorateEn}
-                          </div>
-                          <div className="text-[11px] font-mono text-slate-600 dark:text-slate-300 mt-2">
-                            {lang === 'ar'
-                              ? `توصيل أساسي: ${v.baseDeliveryFeeEgp} ج.م + ${v.perKmFeeEgp} ج.م/كم`
-                              : `Delivery: ${v.baseDeliveryFeeEgp} + ${v.perKmFeeEgp}/km EGP`}
-                          </div>
-                        </div>
-
-                        <button
-                          disabled={isCurrent || busyId === v.id}
-                          onClick={() => handleSwitchActiveVillage(v.id)}
-                          className={`w-full py-2 px-3 rounded-xl font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
-                            isCurrent
-                              ? `${vTheme.solidBg} text-white cursor-default`
-                              : 'bg-slate-900 dark:bg-slate-800 hover:opacity-90 text-white'
-                          }`}
-                        >
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          <span>
-                            {isCurrent
-                              ? lang === 'ar'
-                                ? 'القرية النشطة حالياً ✓'
-                                : 'Active Village ✓'
-                              : lang === 'ar'
-                              ? 'شغّل القرية دي'
-                              : 'Switch to Village'}
-                          </span>
-                        </button>
-                      </div>
+                        <span className={`w-3 h-3 rounded-full ${themeObj.dotBg}`} />
+                        <span>{themeObj.label[lang]}</span>
+                      </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Add New Village Form */}
-              <form
-                onSubmit={handleAddVillage}
-                className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-4"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Plus className="w-4 h-4 text-amber-600" />
-                    <span>{lang === 'ar' ? 'إضافة قرية جديدة للمنصة' : 'Add New Modular Village'}</span>
-                  </h4>
-                  {villageMsg && (
-                    <span className="text-emerald-600 font-bold">{villageMsg}</span>
-                  )}
+              {/* Noqbas Logo Picker / Custom Image Upload */}
+              <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="font-bold text-slate-900 dark:text-white">
+                      {lang === 'ar' ? 'لوجو / شعار قرية نقباس' : 'Noqbas Village Logo'}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {lang === 'ar'
+                        ? 'اختار شعار جاهز أو ارفع صورة لوجو خاصة بقرية نقباس'
+                        : 'Pick a preset emblem or upload a custom logo image'}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {editLogoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setEditLogoUrl('')}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-300 font-bold cursor-pointer"
+                      >
+                        {lang === 'ar' ? 'حذف الصورة' : 'Remove'}
+                      </button>
+                    )}
+                    <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-bold cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{lang === 'ar' ? 'رفع صورة لوجو' : 'Upload Logo'}</span>
+                      <input
+                        key="noqbas-logo-upload"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleUploadNoqbasLogo}
+                        className="sr-only"
+                      />
+                    </label>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      {lang === 'ar' ? 'اسم القرية بالعربي *' : 'Arabic Name *'}
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={newVillageNameAr}
-                      onChange={(e) => setNewVillageNameAr(e.target.value)}
-                      placeholder="قرية ميت عاصم"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                  </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {VILLAGE_LOGO_PRESETS.map((preset) => {
+                    const selected = !editLogoUrl && editLogoIcon === preset.id;
+                    const previewTheme = getVillageTheme(editColorCode);
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setEditLogoIcon(preset.id);
+                          setEditLogoUrl('');
+                        }}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                          selected
+                            ? `${previewTheme.solidBg} text-white border-transparent shadow-2xs`
+                            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {renderVillageLogoGlyph(preset.id, 'w-3.5 h-3.5')}
+                        <span>{preset.label[lang]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-                  <div>
-                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      {lang === 'ar' ? 'اسم القرية بالإنجليزي *' : 'English Name *'}
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={newVillageNameEn}
-                      onChange={(e) => setNewVillageNameEn(e.target.value)}
-                      placeholder="Meet Assem"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      {lang === 'ar' ? 'المركز / المحافظة' : 'Governorate'}
-                    </label>
-                    <input
-                      type="text"
-                      value={newGovAr}
-                      onChange={(e) => setNewGovAr(e.target.value)}
-                      placeholder="مركز بنها - القليوبية"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                  </div>
+              {/* Delivery Pricing */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    {lang === 'ar' ? 'فتح العداد للتوصيل (ج.م)' : 'Base Delivery Fee (EGP)'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editBaseFee}
+                    onChange={(e) => setEditBaseFee(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    {lang === 'ar' ? 'اللون المميز للقرية (Color Code)' : 'Village Color Code'}
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    {lang === 'ar' ? 'تكلفة الكيلو متر (ج.م)' : 'Per-KM Fee (EGP)'}
                   </label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {(Object.keys(VILLAGE_COLOR_THEMES) as VillageColorCode[]).map((code) => {
-                      const themeObj = VILLAGE_COLOR_THEMES[code];
-                      const selected = newColorCode === code;
-                      return (
-                        <button
-                          key={code}
-                          type="button"
-                          onClick={() => setNewColorCode(code)}
-                          className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
-                            selected
-                              ? `${themeObj.border} ${themeObj.softBg} ${themeObj.text}`
-                              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
-                          }`}
-                        >
-                          <span className={`w-3 h-3 rounded-full ${themeObj.dotBg}`} />
-                          <span>{themeObj.label[lang]}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editPerKmFee}
+                    onChange={(e) => setEditPerKmFee(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                  <div>
-                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      {lang === 'ar' ? 'فتح العداد للتوصيل (ج.م)' : 'Base Delivery Fee (EGP)'}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={newBaseFee}
-                      onChange={(e) => setNewBaseFee(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      {lang === 'ar' ? 'تكلفة الكيلو متر (ج.م)' : 'Per-KM Fee (EGP)'}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={newPerKmFee}
-                      onChange={(e) => setNewPerKmFee(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={busyId === 'add-village'}
-                    className="py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
-                  >
-                    {lang === 'ar' ? '+ ضيف القرية للمنصة' : '+ Add Village'}
-                  </button>
-                </div>
-              </form>
-            </div>
+                <button
+                  type="submit"
+                  disabled={busyId === 'save-noqbas'}
+                  className="py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+                >
+                  {busyId === 'save-noqbas'
+                    ? lang === 'ar'
+                      ? 'جاري الحفظ...'
+                      : 'Saving...'
+                    : lang === 'ar'
+                    ? 'حفظ إعدادات قرية نقباس'
+                    : 'Save Noqbas Settings'}
+                </button>
+              </div>
+            </form>
           )}
         </div>
       </div>

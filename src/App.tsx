@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -40,6 +40,7 @@ import {
   OtherService,
   BookingRequest,
   ReviewItem,
+  DemoTestAccount,
   DEFAULT_VILLAGES,
   DEFAULT_DISTRICTS,
   VILLAGE_DOCTORS,
@@ -53,6 +54,9 @@ import {
   VILLAGE_OTHER_SERVICES,
   INITIAL_REVIEWS,
   INITIAL_VILLAGE_ADS,
+  TEST_DEMO_ACCOUNTS,
+  TEST_DEMO_PROVIDERS,
+  TEST_DEMO_BOOKINGS,
   normalizePhone,
   isBanCurrentlyActive
 } from './data/villageData';
@@ -80,7 +84,7 @@ import { NotificationsModal, AppNotificationItem } from './components/Modals/Not
 import { ReviewModal } from './components/Modals/ReviewModal';
 import { ProviderReviewsModal } from './components/Modals/ProviderReviewsModal';
 import { AuthModal } from './components/Modals/AuthModal';
-import { AdminDashboardModal } from './components/Modals/AdminDashboardModal';
+import { AdminDashboardModal, DemoUserAdminAction } from './components/Modals/AdminDashboardModal';
 
 import { Briefcase, AlertCircle, Ban, Phone } from 'lucide-react';
 
@@ -100,9 +104,22 @@ export default function App() {
     firebaseUser?.email === ADMIN_EMAIL && firebaseUser?.emailVerified
   );
 
-  // Modular Multi-Village & Platform Pricing State
-  const [villages, setVillages] = useState<VillageConfig[]>(DEFAULT_VILLAGES);
-  const [activeVillageId, setActiveVillageId] = useState<string>('noqbas');
+  // Test Demo Accounts Session State (2 Test Users + 2 Test Service Providers in Noqbas)
+  const [demoUid, setDemoUid] = useState<string | null>(() => {
+    try {
+      return window.localStorage.getItem('noqbas_demo_uid');
+    } catch {
+      return null;
+    }
+  });
+  const [demoProfilePatch, setDemoProfilePatch] = useState<Record<string, Partial<DemoTestAccount>>>({});
+  const [deletedDemoUids, setDeletedDemoUids] = useState<string[]>([]);
+  const [demoProviderStatusMap, setDemoProviderStatusMap] = useState<
+    Record<string, 'approved' | 'pending' | 'rejected'>
+  >({});
+
+  // Single Village (قرية نقباس) + Platform Pricing State
+  const [activeVillage, setActiveVillage] = useState<VillageConfig>(DEFAULT_VILLAGES[0]);
   const [adPricing, setAdPricing] = useState<PlatformPricingConfig>({
     adPriceWeekEgp: 20,
     adPriceMonthEgp: 50
@@ -122,23 +139,7 @@ export default function App() {
 
   // Per-User Isolated Cart & Bookings
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [bookings, setBookings] = useState<BookingRequest[]>([
-    {
-      id: 'book-init-1',
-      villageId: 'noqbas',
-      serviceType: 'doctor',
-      title: 'كشف باطنة ومتابعة ضغط وسكر',
-      providerName: 'د. طارق الخطيب',
-      customerName: 'الحاج خليل محمد',
-      customerPhone: '01011122233',
-      address: 'الناحية الشرقية - جنب الجامع الكبير',
-      date: '2026-11-14',
-      time: '10:00 AM',
-      totalAmountEgp: 100,
-      status: 'confirmed',
-      createdAt: '2026-11-12'
-    }
-  ]);
+  const [bookings, setBookings] = useState<BookingRequest[]>(TEST_DEMO_BOOKINGS);
 
   // Modals state
   const [isBookingOpen, setIsBookingOpen] = useState(false);
@@ -193,13 +194,71 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setProfileLoaded(false);
-      if (!user) {
+      if (user) {
+        setDemoUid(null);
+        try {
+          window.localStorage.removeItem('noqbas_demo_uid');
+        } catch {
+          // Ignore storage issues
+        }
+      } else {
         setUserProfile(null);
         setOwnPhoneBan(null);
       }
     });
     return () => unsub();
   }, []);
+
+  const activeDemoAccount = useMemo<DemoTestAccount | null>(() => {
+    if (firebaseUser || !demoUid || deletedDemoUids.includes(demoUid)) return null;
+    const base = TEST_DEMO_ACCOUNTS.find((a) => a.uid === demoUid);
+    if (!base) return null;
+    const patch = demoProfilePatch[demoUid] || {};
+    const statusOverride = demoProviderStatusMap[demoUid];
+    return {
+      ...base,
+      ...patch,
+      providerStatus: statusOverride || patch.providerStatus || base.providerStatus
+    };
+  }, [firebaseUser, demoUid, deletedDemoUids, demoProfilePatch, demoProviderStatusMap]);
+
+  const effectiveUid = firebaseUser?.uid || activeDemoAccount?.uid || null;
+  const effectiveProfile: UserProfile | null = activeDemoAccount || userProfile;
+  const isSignedIn = Boolean(firebaseUser || activeDemoAccount);
+
+  const handleLoginDemoAccount = (account: DemoTestAccount) => {
+    if (firebaseUser) {
+      signOut(auth).catch(() => {});
+    }
+    setDemoProfilePatch((prev) => ({
+      ...prev,
+      [account.uid]: {
+        ...(prev[account.uid] || {}),
+        displayName: account.displayName,
+        address: account.address,
+        neighborhood: account.neighborhood,
+        photoUrl: account.photoUrl,
+        serviceTitle: account.serviceTitle,
+        serviceFeeEgp: account.serviceFeeEgp,
+        serviceBio: account.serviceBio
+      }
+    }));
+    setDemoUid(account.uid);
+    try {
+      window.localStorage.setItem('noqbas_demo_uid', account.uid);
+    } catch {
+      // Ignore storage errors
+    }
+  };
+
+  const handleLogoutDemoAccount = () => {
+    setDemoUid(null);
+    try {
+      window.localStorage.removeItem('noqbas_demo_uid');
+    } catch {
+      // Ignore storage errors
+    }
+  };
 
   // 2. Active User Profile Listener
   useEffect(() => {
@@ -263,7 +322,7 @@ export default function App() {
   }, [firebaseUser, profileLoaded, isAdmin, isAuthModalOpen, userProfile, promptedPhoneForUid]);
 
   // 2d. Per-User Isolated Cart Listener (Firestore /carts/{uid} + UID-scoped localStorage)
-  const cartStorageKey = firebaseUser ? `noqbas_cart_${firebaseUser.uid}` : 'noqbas_cart_guest';
+  const cartStorageKey = effectiveUid ? `noqbas_cart_${effectiveUid}` : 'noqbas_cart_guest';
   useEffect(() => {
     try {
       const saved = localStorage.getItem(cartStorageKey);
@@ -324,36 +383,34 @@ export default function App() {
     };
   }, [isAdmin]);
 
-  // 3. Modular Villages + Global Active Village + Ad Pricing Listener
+  // 3. Single Village (قرية نقباس) + Ad Pricing Listener
   useEffect(() => {
-    const unsubVillages = onSnapshot(
-      collection(db, 'villages'),
+    const unsubVillage = onSnapshot(
+      doc(db, 'villages', 'noqbas'),
       (snap) => {
-        const remoteMap = new Map<string, VillageConfig>();
-        DEFAULT_VILLAGES.forEach((v) => remoteMap.set(v.id, v));
-        snap.docs.forEach((d) => {
-          const data = d.data() as Partial<VillageConfig>;
-          if (data.id && data.nameAr && data.nameEn) {
-            remoteMap.set(data.id, {
-              id: data.id,
-              nameAr: data.nameAr.replace(/ىقباس/g, 'نقباس'),
-              nameEn: data.nameEn,
-              governorateAr: data.governorateAr || 'مصر',
-              governorateEn: data.governorateEn || 'Egypt',
-              descriptionAr: (data.descriptionAr || '').replace(/ىقباس/g, 'نقباس'),
-              descriptionEn: data.descriptionEn || '',
-              baseDeliveryFeeEgp: Number(data.baseDeliveryFeeEgp ?? 10),
-              perKmFeeEgp: Number(data.perKmFeeEgp ?? 5),
-              colorCode: (data.colorCode as VillageColorCode) || 'amber',
-              isActive: data.isActive !== false,
-              districts: data.districts || DEFAULT_DISTRICTS
-            });
-          }
-        });
-        setVillages(Array.from(remoteMap.values()));
+        if (snap.exists()) {
+          const data = snap.data() as Partial<VillageConfig>;
+          setActiveVillage({
+            ...DEFAULT_VILLAGES[0],
+            id: 'noqbas',
+            nameAr: 'قرية نقباس',
+            nameEn: 'Noqbas Village',
+            governorateAr: data.governorateAr || DEFAULT_VILLAGES[0].governorateAr,
+            governorateEn: data.governorateEn || DEFAULT_VILLAGES[0].governorateEn,
+            descriptionAr: (data.descriptionAr || DEFAULT_VILLAGES[0].descriptionAr).replace(/ىقباس/g, 'نقباس'),
+            descriptionEn: data.descriptionEn || DEFAULT_VILLAGES[0].descriptionEn,
+            baseDeliveryFeeEgp: Number(data.baseDeliveryFeeEgp ?? DEFAULT_VILLAGES[0].baseDeliveryFeeEgp),
+            perKmFeeEgp: Number(data.perKmFeeEgp ?? DEFAULT_VILLAGES[0].perKmFeeEgp),
+            colorCode: (data.colorCode as VillageColorCode) || DEFAULT_VILLAGES[0].colorCode,
+            logoIcon: data.logoIcon || DEFAULT_VILLAGES[0].logoIcon || 'wheat',
+            logoUrl: data.logoUrl || '',
+            isActive: true,
+            districts: data.districts || DEFAULT_DISTRICTS
+          });
+        }
       },
       (err) => {
-        console.warn('Villages listener warning:', err.message);
+        console.warn('Noqbas village listener warning:', err.message);
       }
     );
 
@@ -362,13 +419,9 @@ export default function App() {
       (snap) => {
         if (snap.exists()) {
           const data = snap.data() as {
-            activeVillageId?: string;
             adPriceWeekEgp?: number;
             adPriceMonthEgp?: number;
           };
-          if (data.activeVillageId) {
-            setActiveVillageId(data.activeVillageId);
-          }
           if (typeof data.adPriceWeekEgp === 'number' || typeof data.adPriceMonthEgp === 'number') {
             setAdPricing({
               adPriceWeekEgp: typeof data.adPriceWeekEgp === 'number' ? data.adPriceWeekEgp : 20,
@@ -383,7 +436,7 @@ export default function App() {
     );
 
     return () => {
-      unsubVillages();
+      unsubVillage();
       unsubSettings();
     };
   }, []);
@@ -536,16 +589,16 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // 7. User Bookings Listener (when signed in)
+  // 7. User Bookings Listener (when signed in via Firebase or Test Account)
   useEffect(() => {
-    if (!firebaseUser) {
-      setBookings([]);
+    if (!effectiveUid) {
+      setBookings(TEST_DEMO_BOOKINGS);
       setSeenNotificationIds([]);
       return;
     }
 
     try {
-      const saved = window.localStorage.getItem(`noqbas_seen_notifs_${firebaseUser.uid}`);
+      const saved = window.localStorage.getItem(`noqbas_seen_notifs_${effectiveUid}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) setSeenNotificationIds(parsed);
@@ -554,6 +607,11 @@ export default function App() {
       }
     } catch {
       setSeenNotificationIds([]);
+    }
+
+    if (!firebaseUser) {
+      setBookings(TEST_DEMO_BOOKINGS);
+      return;
     }
 
     const qBookings = isAdmin
@@ -584,41 +642,112 @@ export default function App() {
       (err) => console.warn('Bookings listener warning:', err.message)
     );
     return () => unsub();
-  }, [isAdmin, firebaseUser?.uid]);
+  }, [isAdmin, firebaseUser?.uid, effectiveUid]);
 
-  // Derived active village + per-village color theme
-  const activeVillage = useMemo(
-    () => villages.find((v) => v.id === activeVillageId) || villages[0] || DEFAULT_VILLAGES[0],
-    [villages, activeVillageId]
-  );
+  // Derived color theme for قرية نقباس
   const theme = getVillageTheme(activeVillage.colorCode);
-
-  const handleSwitchVillage = async (vid: string) => {
-    setActiveVillageId(vid);
-    if (isAdmin) {
-      try {
-        await setDoc(doc(db, 'appConfig', 'settings'), {
-          activeVillageId: vid,
-          adPriceWeekEgp: adPricing.adPriceWeekEgp,
-          adPriceMonthEgp: adPricing.adPriceMonthEgp,
-          updatedAt: serverTimestamp()
-        });
-      } catch (err) {
-        console.warn('Could not persist active village to Firestore:', err);
-      }
-    }
-  };
 
   const isCurrentUserBanned = useMemo(
     () =>
       !isAdmin &&
-      (isBanCurrentlyActive(userProfile?.isBanned, userProfile?.banUntilMs, false, nowMs) ||
+      (isBanCurrentlyActive(effectiveProfile?.isBanned, effectiveProfile?.banUntilMs, false, nowMs) ||
         Boolean(
           ownPhoneBan &&
             isBanCurrentlyActive(true, ownPhoneBan.banUntilMs, ownPhoneBan.isPermanent, nowMs)
         )),
-    [isAdmin, userProfile, ownPhoneBan, nowMs]
+    [isAdmin, effectiveProfile, ownPhoneBan, nowMs]
   );
+
+  // Merge Firestore + Demo Test Accounts (2 Test Users + 2 Test Service Providers)
+  const mergedUsers = useMemo<UserProfile[]>(() => {
+    const map = new Map<string, UserProfile>();
+    allUsers.forEach((u) => map.set(u.uid, u));
+    TEST_DEMO_ACCOUNTS.forEach((acc) => {
+      if (deletedDemoUids.includes(acc.uid)) return;
+      if (!map.has(acc.uid)) {
+        const patch = demoProfilePatch[acc.uid] || {};
+        const statusOverride = demoProviderStatusMap[acc.uid];
+        map.set(acc.uid, {
+          ...acc,
+          ...patch,
+          providerStatus: statusOverride || patch.providerStatus || acc.providerStatus
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [allUsers, deletedDemoUids, demoProfilePatch, demoProviderStatusMap]);
+
+  const mergedProviders = useMemo<ProviderListing[]>(() => {
+    const map = new Map<string, ProviderListing>();
+    firestoreProviders.forEach((p) => map.set(p.id, p));
+    TEST_DEMO_PROVIDERS.forEach((p) => {
+      if (deletedDemoUids.includes(p.ownerId)) return;
+      if (!map.has(p.id)) {
+        const patch = demoProfilePatch[p.ownerId] || {};
+        map.set(p.id, {
+          ...p,
+          nameAr: patch.displayName || p.nameAr,
+          nameEn: patch.displayName || p.nameEn,
+          status: demoProviderStatusMap[p.id] || p.status
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [firestoreProviders, deletedDemoUids, demoProfilePatch, demoProviderStatusMap]);
+
+  const mergedBannedPhones = useMemo<BannedPhoneRecord[]>(() => {
+    const map = new Map<string, BannedPhoneRecord>();
+    bannedPhones.forEach((bp) => map.set(bp.phone, bp));
+    TEST_DEMO_ACCOUNTS.forEach((acc) => {
+      if (deletedDemoUids.includes(acc.uid)) return;
+      const patch = demoProfilePatch[acc.uid];
+      if (patch?.isBanned) {
+        const norm = normalizePhone(acc.phone);
+        map.set(norm, {
+          phone: norm,
+          userId: acc.uid,
+          userName: patch.displayName || acc.displayName,
+          reason: patch.banReason || '',
+          banUntilMs: patch.banUntilMs || 0,
+          isPermanent: !patch.banUntilMs
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [bannedPhones, deletedDemoUids, demoProfilePatch]);
+
+  const handleDemoUserAction = (action: DemoUserAdminAction) => {
+    if (action.type === 'ban') {
+      setDemoProfilePatch((prev) => ({
+        ...prev,
+        [action.uid]: {
+          ...(prev[action.uid] || {}),
+          isBanned: true,
+          banUntilMs: action.isPermanent ? 0 : action.banUntilMs,
+          banReason: action.reason
+        }
+      }));
+    } else if (action.type === 'unban') {
+      setDemoProfilePatch((prev) => ({
+        ...prev,
+        [action.uid]: {
+          ...(prev[action.uid] || {}),
+          isBanned: false,
+          banUntilMs: 0,
+          banReason: ''
+        }
+      }));
+    } else if (action.type === 'delete') {
+      setDeletedDemoUids((prev) => (prev.includes(action.uid) ? prev : [...prev, action.uid]));
+      if (demoUid === action.uid) {
+        handleLogoutDemoAccount();
+      }
+    }
+  };
+
+  const handleDemoProviderDecision = (providerId: string, decision: 'approved' | 'rejected') => {
+    setDemoProviderStatusMap((prev) => ({ ...prev, [providerId]: decision }));
+  };
 
   // Merge Firestore reviews + Initial reviews
   const reviews = useMemo(() => {
@@ -632,8 +761,8 @@ export default function App() {
 
   // Merge approved custom providers into section arrays
   const approvedProviders = useMemo(
-    () => firestoreProviders.filter((p) => p.status === 'approved'),
-    [firestoreProviders]
+    () => mergedProviders.filter((p) => p.status === 'approved'),
+    [mergedProviders]
   );
 
   const allDoctors = useMemo<DoctorService[]>(() => {
@@ -821,18 +950,18 @@ export default function App() {
 
   const pendingAdminCount = useMemo(
     () =>
-      firestoreProviders.filter((p) => p.status === 'pending').length +
+      mergedProviders.filter((p) => p.status === 'pending').length +
       firestoreAds.filter((a) => a.status === 'pending').length,
-    [firestoreProviders, firestoreAds]
+    [mergedProviders, firestoreAds]
   );
 
   // Live Notifications for Signed-In User
   const userNotifications = useMemo<AppNotificationItem[]>(() => {
-    if (!firebaseUser) return [];
+    if (!isSignedIn || !effectiveUid) return [];
     const list: AppNotificationItem[] = [];
 
     if (isAdmin) {
-      const pendingProv = firestoreProviders.filter((p) => p.status === 'pending').length;
+      const pendingProv = mergedProviders.filter((p) => p.status === 'pending').length;
       const pendingAds = firestoreAds.filter((a) => a.status === 'pending').length;
       if (pendingProv > 0) {
         list.push({
@@ -860,7 +989,7 @@ export default function App() {
 
     if (isCurrentUserBanned) {
       list.push({
-        id: `ban-${ownPhoneBan?.banUntilMs || userProfile?.banUntilMs || 'perm'}`,
+        id: `ban-${ownPhoneBan?.banUntilMs || effectiveProfile?.banUntilMs || 'perm'}`,
         type: 'ban',
         tone: 'danger',
         title: lang === 'ar' ? 'الحساب محظور حالياً' : 'Account Currently Restricted',
@@ -868,7 +997,7 @@ export default function App() {
           ? 'حسابك محظور مؤقتاً أو دائماً من تقديم طلبات جديدة.'
           : 'Your account is restricted from submitting new requests.'
       });
-    } else if (profileLoaded && !isAdmin && (!userProfile || !userProfile.phone)) {
+    } else if (!activeDemoAccount && profileLoaded && !isAdmin && (!userProfile || !userProfile.phone)) {
       list.push({
         id: 'complete-profile-reminder',
         type: 'account',
@@ -880,18 +1009,18 @@ export default function App() {
       });
     }
 
-    if (userProfile?.role === 'provider') {
-      if (userProfile.providerStatus === 'approved') {
+    if (effectiveProfile?.role === 'provider') {
+      if (effectiveProfile.providerStatus === 'approved') {
         list.push({
           id: 'prov-status-approved',
           type: 'provider',
           tone: 'success',
           title: lang === 'ar' ? 'تم تفعيل حسابك كمقدم خدمة' : 'Provider Account Approved',
           body: lang === 'ar'
-            ? 'مبروك! نشاطك ظاهر دلوقتي لكل أهالي القرية.'
-            : 'Your service profile is now live and visible across the village.'
+            ? 'مبروك! نشاطك ظاهر دلوقتي لكل أهالي قرية نقباس.'
+            : 'Your service profile is now live across Noqbas Village.'
         });
-      } else if (userProfile.providerStatus === 'pending') {
+      } else if (effectiveProfile.providerStatus === 'pending') {
         list.push({
           id: 'prov-status-pending',
           type: 'provider',
@@ -901,7 +1030,7 @@ export default function App() {
             ? 'الأدمن بيراجع بياناتك وهيتفعل حسابك قريب.'
             : 'Admin is reviewing your provider application.'
         });
-      } else if (userProfile.providerStatus === 'rejected') {
+      } else if (effectiveProfile.providerStatus === 'rejected') {
         list.push({
           id: 'prov-status-rejected',
           type: 'provider',
@@ -915,7 +1044,7 @@ export default function App() {
     }
 
     allAds
-      .filter((ad) => ad.ownerId === firebaseUser.uid)
+      .filter((ad) => ad.ownerId === effectiveUid)
       .forEach((ad) => {
         list.push({
           id: `ad-${ad.id}-${ad.status}`,
@@ -949,7 +1078,7 @@ export default function App() {
       });
 
     bookings
-      .filter((b) => b.ownerId === firebaseUser.uid)
+      .filter((b) => b.ownerId === effectiveUid || normalizePhone(b.customerPhone) === normalizePhone(effectiveProfile?.phone || ''))
       .forEach((b) => {
         list.push({
           id: `booking-${b.id}`,
@@ -963,12 +1092,15 @@ export default function App() {
 
     return list;
   }, [
-    firebaseUser,
+    isSignedIn,
+    effectiveUid,
+    activeDemoAccount,
     isAdmin,
-    firestoreProviders,
+    mergedProviders,
     firestoreAds,
     isCurrentUserBanned,
     ownPhoneBan,
+    effectiveProfile,
     userProfile,
     profileLoaded,
     allAds,
@@ -982,27 +1114,27 @@ export default function App() {
   );
 
   const handleMarkAllNotificationsRead = () => {
-    if (!firebaseUser) return;
+    if (!effectiveUid) return;
     const allIds = userNotifications.map((n) => n.id);
     setSeenNotificationIds(allIds);
     try {
-      window.localStorage.setItem(`noqbas_seen_notifs_${firebaseUser.uid}`, JSON.stringify(allIds));
+      window.localStorage.setItem(`noqbas_seen_notifs_${effectiveUid}`, JSON.stringify(allIds));
     } catch {
       // Ignore storage quota errors
     }
   };
 
-  // Save Booking to Firestore (when signed in) + Local State
+  // Save Booking to Firestore (when real Firebase user signed in) + Local State
   const persistBooking = async (booking: BookingRequest) => {
-    const withOwner: BookingRequest = firebaseUser
-      ? { ...booking, ownerId: booking.ownerId || firebaseUser.uid }
+    const withOwner: BookingRequest = effectiveUid
+      ? { ...booking, ownerId: booking.ownerId || effectiveUid }
       : booking;
     setBookings((prev) => [withOwner, ...prev]);
     if (firebaseUser) {
       try {
         const payload: Record<string, unknown> = {
           ownerId: firebaseUser.uid,
-          villageId: activeVillage.id,
+          villageId: 'noqbas',
           serviceType: booking.serviceType,
           title: booking.title.slice(0, 160),
           providerName: booking.providerName.slice(0, 100),
@@ -1158,15 +1290,15 @@ export default function App() {
 
   // Mandatory Login + Active Account Gate Helper
   const canUsePlatformServices = Boolean(
-    firebaseUser && !isCurrentUserBanned && (isAdmin || (userProfile && userProfile.phone))
+    isSignedIn && !isCurrentUserBanned && (isAdmin || (effectiveProfile && effectiveProfile.phone))
   );
 
   const requireAuth = (next: () => void) => {
-    if (!firebaseUser) {
+    if (!isSignedIn) {
       openAuthModal('login');
       return;
     }
-    if (!isAdmin && (!userProfile || !userProfile.phone)) {
+    if (!isAdmin && (!effectiveProfile || !effectiveProfile.phone)) {
       openAuthModal('register');
       return;
     }
@@ -1428,12 +1560,10 @@ export default function App() {
         onOpenEmergency={() => setIsEmergencyModalOpen(true)}
         onOpenAssistant={() => requireAuth(() => setIsAssistantModalOpen(true))}
         activeVillage={activeVillage}
-        villages={villages}
-        onSwitchVillage={handleSwitchVillage}
-        isSignedIn={Boolean(firebaseUser)}
+        isSignedIn={isSignedIn}
         isAdmin={isAdmin}
-        userProfile={userProfile}
-        userPhotoUrl={userProfile?.photoUrl || ''}
+        userProfile={effectiveProfile}
+        userPhotoUrl={effectiveProfile?.photoUrl || ''}
         pendingAdminCount={pendingAdminCount}
         onOpenAuth={() => openAuthModal('login')}
         onOpenAdminPanel={() => setIsAdminModalOpen(true)}
@@ -1457,9 +1587,9 @@ export default function App() {
               activeVillageId={activeVillage.id}
               activeVillageName={activeVillageName}
               activeVillage={activeVillage}
-              currentUserId={firebaseUser?.uid || null}
-              currentUserName={userProfile?.displayName || firebaseUser?.displayName || (lang === 'ar' ? 'معلن من القرية' : 'Village Advertiser')}
-              defaultPhone={userProfile?.phone || ''}
+              currentUserId={effectiveUid}
+              currentUserName={effectiveProfile?.displayName || firebaseUser?.displayName || (lang === 'ar' ? 'معلن من القرية' : 'Village Advertiser')}
+              defaultPhone={effectiveProfile?.phone || ''}
               isAdmin={isAdmin}
               isBanned={isCurrentUserBanned}
               adPricing={adPricing}
@@ -1471,7 +1601,7 @@ export default function App() {
         />
 
         {/* Provider Account Status Notice (Pending / Rejected) */}
-        {userProfile?.role === 'provider' && userProfile.providerStatus === 'pending' && (
+        {effectiveProfile?.role === 'provider' && effectiveProfile.providerStatus === 'pending' && (
           <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 rounded-2xl p-4 text-xs">
             <div className="flex items-center gap-2.5 text-amber-900 dark:text-amber-200">
               <Briefcase className="w-4 h-4 text-amber-600 shrink-0" />
@@ -1490,7 +1620,7 @@ export default function App() {
           </div>
         )}
 
-        {userProfile?.role === 'provider' && userProfile.providerStatus === 'rejected' && (
+        {effectiveProfile?.role === 'provider' && effectiveProfile.providerStatus === 'rejected' && (
           <div className="flex flex-wrap items-center justify-between gap-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/70 rounded-2xl p-4 text-xs">
             <div className="flex items-center gap-2.5 text-rose-900 dark:text-rose-200">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
@@ -1521,15 +1651,15 @@ export default function App() {
                     : 'Your account / mobile phone is currently banned from platform actions'}
                 </div>
                 <div className="text-[11px] opacity-85">
-                  {(ownPhoneBan?.banUntilMs || userProfile?.banUntilMs)
+                  {(ownPhoneBan?.banUntilMs || effectiveProfile?.banUntilMs)
                     ? lang === 'ar'
-                      ? `ينتهي الحظر: ${new Date((ownPhoneBan?.banUntilMs || userProfile?.banUntilMs)!).toLocaleString('ar-EG')}`
-                      : `Expires: ${new Date((ownPhoneBan?.banUntilMs || userProfile?.banUntilMs)!).toLocaleString()}`
+                      ? `ينتهي الحظر: ${new Date((ownPhoneBan?.banUntilMs || effectiveProfile?.banUntilMs)!).toLocaleString('ar-EG')}`
+                      : `Expires: ${new Date((ownPhoneBan?.banUntilMs || effectiveProfile?.banUntilMs)!).toLocaleString()}`
                     : lang === 'ar'
                     ? 'حظر دائم'
                     : 'Permanent ban'}
-                  {(ownPhoneBan?.reason || userProfile?.banReason)
-                    ? ` · ${ownPhoneBan?.reason || userProfile?.banReason}`
+                  {(ownPhoneBan?.reason || effectiveProfile?.banReason)
+                    ? ` · ${ownPhoneBan?.reason || effectiveProfile?.banReason}`
                     : ''}
                 </div>
               </div>
@@ -1701,12 +1831,13 @@ export default function App() {
         initialMode={authModalMode}
         firebaseUser={firebaseUser}
         userProfile={userProfile}
+        activeDemoAccount={activeDemoAccount}
+        onLoginDemoAccount={handleLoginDemoAccount}
+        onLogoutDemoAccount={handleLogoutDemoAccount}
         isAdmin={isAdmin}
         isBanned={isCurrentUserBanned}
-        banReason={ownPhoneBan?.reason || userProfile?.banReason}
-        banUntilMs={ownPhoneBan?.banUntilMs || userProfile?.banUntilMs}
-        villages={villages}
-        activeVillageId={activeVillage.id}
+        banReason={ownPhoneBan?.reason || effectiveProfile?.banReason}
+        banUntilMs={ownPhoneBan?.banUntilMs || effectiveProfile?.banUntilMs}
         onProfileSaved={() => {}}
         onOpenAdminPanel={() => setIsAdminModalOpen(true)}
       />
@@ -1716,23 +1847,29 @@ export default function App() {
           isOpen={isAdminModalOpen}
           onClose={() => setIsAdminModalOpen(false)}
           lang={lang}
-          providers={firestoreProviders}
-          ads={firestoreAds}
-          users={allUsers}
-          bannedPhones={bannedPhones}
+          providers={mergedProviders}
+          ads={allAds}
+          users={mergedUsers}
+          bannedPhones={mergedBannedPhones}
           bookings={bookings}
-          reviewsCount={reviews.length}
-          villages={villages}
-          activeVillageId={activeVillage.id}
+          reviews={reviews}
+          serviceCounts={{
+            doctors: allDoctors.length,
+            pharmacy: allPharmacy.length,
+            food: allFoods.length,
+            technicians: allTechnicians.length,
+            rides: allRides.length,
+            grocery: allGrocery.length,
+            tutoring: allTutors.length,
+            charity: allCharities.length,
+            other: allOtherServices.length
+          }}
+          activeVillage={activeVillage}
           adPricing={adPricing}
           nowMs={nowMs}
-          onSwitchVillage={handleSwitchVillage}
-          onVillageAdded={(v) => {
-            setVillages((prev) => {
-              const exists = prev.some((item) => item.id === v.id);
-              return exists ? prev.map((item) => (item.id === v.id ? v : item)) : [...prev, v];
-            });
-          }}
+          onVillageUpdated={(updated) => setActiveVillage(updated)}
+          onDemoUserAction={handleDemoUserAction}
+          onDemoProviderDecision={handleDemoProviderDecision}
         />
       )}
 
@@ -1743,9 +1880,9 @@ export default function App() {
         providerName={bookingDetails.providerName}
         serviceTitle={bookingDetails.title}
         lang={lang}
-        defaultName={userProfile?.displayName || firebaseUser?.displayName || ''}
-        defaultPhone={userProfile?.phone || ''}
-        defaultAddress={userProfile?.address || userProfile?.neighborhood || ''}
+        defaultName={effectiveProfile?.displayName || firebaseUser?.displayName || ''}
+        defaultPhone={effectiveProfile?.phone || ''}
+        defaultAddress={effectiveProfile?.address || effectiveProfile?.neighborhood || ''}
         onConfirmBooking={persistBooking}
       />
 
@@ -1754,9 +1891,9 @@ export default function App() {
         onClose={() => setIsPrescriptionModalOpen(false)}
         lang={lang}
         activeVillage={activeVillage}
-        defaultName={userProfile?.displayName || firebaseUser?.displayName || ''}
-        defaultPhone={userProfile?.phone || ''}
-        defaultAddress={userProfile?.address || userProfile?.neighborhood || ''}
+        defaultName={effectiveProfile?.displayName || firebaseUser?.displayName || ''}
+        defaultPhone={effectiveProfile?.phone || ''}
+        defaultAddress={effectiveProfile?.address || effectiveProfile?.neighborhood || ''}
         onPrescriptionSent={handlePrescriptionSent}
       />
 
@@ -1766,9 +1903,9 @@ export default function App() {
         items={cart}
         lang={lang}
         activeVillage={activeVillage}
-        defaultName={userProfile?.displayName || firebaseUser?.displayName || ''}
-        defaultPhone={userProfile?.phone || ''}
-        defaultAddress={userProfile?.address || userProfile?.neighborhood || ''}
+        defaultName={effectiveProfile?.displayName || firebaseUser?.displayName || ''}
+        defaultPhone={effectiveProfile?.phone || ''}
+        defaultAddress={effectiveProfile?.address || effectiveProfile?.neighborhood || ''}
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveCartItem}
         onClearCart={handleClearCart}
@@ -1821,7 +1958,7 @@ export default function App() {
         targetName={activeReviewTarget.name}
         targetRole={activeReviewTarget.role}
         lang={lang}
-        defaultName={userProfile?.displayName || firebaseUser?.displayName || ''}
+        defaultName={effectiveProfile?.displayName || firebaseUser?.displayName || ''}
         onSubmitReview={handleAddReview}
       />
 
@@ -1841,7 +1978,7 @@ export default function App() {
               onClick={() => openAuthModal('login')}
               className="text-slate-700 dark:text-slate-300 font-semibold hover:underline cursor-pointer"
             >
-              {firebaseUser ? t.account : t.login}
+              {isSignedIn ? t.account : t.login}
             </button>
             <span>·</span>
             <button
