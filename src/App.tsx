@@ -12,12 +12,15 @@ import {
   query,
   where,
   setDoc,
+  updateDoc,
   serverTimestamp
 } from 'firebase/firestore';
 import {
   auth,
   db,
-  ADMIN_EMAIL
+  ADMIN_EMAIL,
+  handleFirestoreError,
+  OperationType
 } from './firebase';
 import {
   Language,
@@ -39,9 +42,14 @@ import {
   CharityOrg,
   OtherService,
   BookingRequest,
+  BookingStatus,
+  PaymentMethod,
+  PaymentStatus,
+  PendingPaymentOrder,
   ReviewItem,
   DemoTestAccount,
   DEFAULT_VILLAGES,
+  parsePriceEgp,
   DEFAULT_DISTRICTS,
   VILLAGE_DOCTORS,
   VILLAGE_TECHNICIANS,
@@ -58,7 +66,8 @@ import {
   TEST_DEMO_PROVIDERS,
   TEST_DEMO_BOOKINGS,
   normalizePhone,
-  isBanCurrentlyActive
+  isBanCurrentlyActive,
+  getServiceStatusLabel
 } from './data/villageData';
 import { TRANSLATIONS } from './data/translations';
 
@@ -85,6 +94,10 @@ import { ReviewModal } from './components/Modals/ReviewModal';
 import { ProviderReviewsModal } from './components/Modals/ProviderReviewsModal';
 import { AuthModal } from './components/Modals/AuthModal';
 import { AdminDashboardModal, DemoUserAdminAction } from './components/Modals/AdminDashboardModal';
+import { OrderStatusModal } from './components/Modals/OrderStatusModal';
+import { ProviderOrdersModal } from './components/Modals/ProviderOrdersModal';
+import { PaymentPage } from './components/PaymentPage';
+import { ProviderWorkspace } from './components/ProviderWorkspace';
 
 import { Briefcase, AlertCircle, Ban, Phone } from 'lucide-react';
 
@@ -122,7 +135,8 @@ export default function App() {
   const [activeVillage, setActiveVillage] = useState<VillageConfig>(DEFAULT_VILLAGES[0]);
   const [adPricing, setAdPricing] = useState<PlatformPricingConfig>({
     adPriceWeekEgp: 20,
-    adPriceMonthEgp: 50
+    adPriceMonthEgp: 50,
+    commissionRatePercent: 10
   });
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
@@ -141,16 +155,22 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [bookings, setBookings] = useState<BookingRequest[]>(TEST_DEMO_BOOKINGS);
 
-  // Modals state
+  // Modals & Checkout Page state
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [bookingDetails, setBookingDetails] = useState<{
     type: 'doctor' | 'technician' | 'ride' | 'tutoring' | 'charity' | 'other';
+    providerOwnerId?: string;
     providerName: string;
     title: string;
-  }>({ type: 'doctor', providerName: '', title: '' });
+    feeEgp: number;
+  }>({ type: 'doctor', providerOwnerId: undefined, providerName: '', title: '', feeEgp: 50 });
 
   const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
   const [isCartModalOpen, setIsCartModalOpen] = useState(false);
+  const [isOrderStatusOpen, setIsOrderStatusOpen] = useState(false);
+  const [isProviderOrdersOpen, setIsProviderOrdersOpen] = useState(false);
+  const [recentlyCompletedOrderId, setRecentlyCompletedOrderId] = useState<string | null>(null);
+  const [pendingPayment, setPendingPayment] = useState<PendingPaymentOrder | null>(null);
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [isAssistantModalOpen, setIsAssistantModalOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -421,11 +441,18 @@ export default function App() {
           const data = snap.data() as {
             adPriceWeekEgp?: number;
             adPriceMonthEgp?: number;
+            commissionRatePercent?: number;
           };
-          if (typeof data.adPriceWeekEgp === 'number' || typeof data.adPriceMonthEgp === 'number') {
+          if (
+            typeof data.adPriceWeekEgp === 'number' ||
+            typeof data.adPriceMonthEgp === 'number' ||
+            typeof data.commissionRatePercent === 'number'
+          ) {
             setAdPricing({
               adPriceWeekEgp: typeof data.adPriceWeekEgp === 'number' ? data.adPriceWeekEgp : 20,
-              adPriceMonthEgp: typeof data.adPriceMonthEgp === 'number' ? data.adPriceMonthEgp : 50
+              adPriceMonthEgp: typeof data.adPriceMonthEgp === 'number' ? data.adPriceMonthEgp : 50,
+              commissionRatePercent:
+                typeof data.commissionRatePercent === 'number' ? data.commissionRatePercent : 10
             });
           }
         }
@@ -610,38 +637,95 @@ export default function App() {
     }
 
     if (!firebaseUser) {
-      setBookings(TEST_DEMO_BOOKINGS);
+      setBookings((prev) => (prev.length > 0 ? prev : TEST_DEMO_BOOKINGS));
       return;
     }
 
-    const qBookings = isAdmin
-      ? collection(db, 'bookings')
-      : query(collection(db, 'bookings'), where('ownerId', '==', firebaseUser.uid));
-
-    const unsub = onSnapshot(
-      qBookings,
-      (snap) => {
-        if (snap.empty) return;
-        const remote: BookingRequest[] = snap.docs.map((d) => {
-          const data = d.data() as BookingRequest;
-          return {
-            ...data,
-            id: d.id,
-            createdAt: typeof data.createdAt === 'string' ? data.createdAt : new Date().toLocaleDateString()
-          };
-        });
-        setBookings((prev) => {
-          const map = new Map<string, BookingRequest>();
-          remote.forEach((b) => map.set(b.id, b));
-          prev.forEach((b) => {
-            if (!map.has(b.id)) map.set(b.id, b);
+    if (isAdmin) {
+      const unsub = onSnapshot(
+        collection(db, 'bookings'),
+        (snap) => {
+          if (snap.empty) return;
+          const remote: BookingRequest[] = snap.docs.map((d) => {
+            const data = d.data() as BookingRequest;
+            return {
+              ...data,
+              id: d.id,
+              createdAt:
+                typeof data.createdAt === 'string'
+                  ? data.createdAt
+                  : new Date().toLocaleDateString()
+            };
           });
-          return Array.from(map.values());
+          setBookings((prev) => {
+            const map = new Map<string, BookingRequest>();
+            remote.forEach((b) => map.set(b.id, b));
+            prev.forEach((b) => {
+              if (!map.has(b.id)) map.set(b.id, b);
+            });
+            return Array.from(map.values());
+          });
+        },
+        (err) => console.warn('Bookings listener warning:', err.message)
+      );
+      return () => unsub();
+    }
+
+    let ownerRemote: BookingRequest[] = [];
+    let providerRemote: BookingRequest[] = [];
+
+    const syncCustomerAndProviderBookings = () => {
+      if (ownerRemote.length === 0 && providerRemote.length === 0) return;
+      setBookings((prev) => {
+        const map = new Map<string, BookingRequest>();
+        ownerRemote.forEach((b) => map.set(b.id, b));
+        providerRemote.forEach((b) => map.set(b.id, b));
+        prev.forEach((b) => {
+          if (!map.has(b.id)) map.set(b.id, b);
         });
+        return Array.from(map.values());
+      });
+    };
+
+    const mapSnapshotDocs = (docs: { id: string; data: () => unknown }[]): BookingRequest[] =>
+      docs.map((d) => {
+        const data = d.data() as BookingRequest;
+        return {
+          ...data,
+          id: d.id,
+          createdAt:
+            typeof data.createdAt === 'string'
+              ? data.createdAt
+              : new Date().toLocaleDateString()
+        };
+      });
+
+    const unsubOwner = onSnapshot(
+      query(collection(db, 'bookings'), where('ownerId', '==', firebaseUser.uid)),
+      (snap) => {
+        ownerRemote = mapSnapshotDocs(snap.docs);
+        syncCustomerAndProviderBookings();
       },
-      (err) => console.warn('Bookings listener warning:', err.message)
+      (err) => console.warn('Owner bookings listener warning:', err.message)
     );
-    return () => unsub();
+
+    const unsubProvider = onSnapshot(
+      query(
+        collection(db, 'bookings'),
+        where('providerOwnerId', '==', firebaseUser.uid),
+        where('providerVisible', '==', true)
+      ),
+      (snap) => {
+        providerRemote = mapSnapshotDocs(snap.docs);
+        syncCustomerAndProviderBookings();
+      },
+      (err) => console.warn('Provider bookings listener warning:', err.message)
+    );
+
+    return () => {
+      unsubOwner();
+      unsubProvider();
+    };
   }, [isAdmin, firebaseUser?.uid, effectiveUid]);
 
   // Derived color theme for قرية نقباس
@@ -770,6 +854,7 @@ export default function App() {
       .filter((p) => p.category === 'doctor')
       .map((p) => ({
         id: `prov-${p.id}`,
+        ownerId: p.ownerId,
         villageId: p.villageId,
         name: { ar: p.nameAr, en: p.nameEn },
         specialty: { ar: p.specialtyAr, en: p.specialtyEn },
@@ -791,6 +876,7 @@ export default function App() {
       .filter((p) => p.category === 'technician')
       .map((p) => ({
         id: `prov-${p.id}`,
+        ownerId: p.ownerId,
         villageId: p.villageId,
         name: { ar: p.nameAr, en: p.nameEn },
         craft: { ar: p.specialtyAr, en: p.specialtyEn },
@@ -815,6 +901,7 @@ export default function App() {
         const numeric = parseFloat((p.priceLabelAr || '100').replace(/[^\d.]/g, '')) || 100;
         return {
           id: `prov-food-${p.id}`,
+          ownerId: p.ownerId,
           villageId: p.villageId,
           name: { ar: p.specialtyAr, en: p.specialtyEn },
           description: { ar: p.bioAr || p.specialtyAr, en: p.bioEn || p.specialtyEn },
@@ -835,6 +922,7 @@ export default function App() {
         const numeric = parseFloat((p.priceLabelAr || '50').replace(/[^\d.]/g, '')) || 50;
         return {
           id: `prov-ph-${p.id}`,
+          ownerId: p.ownerId,
           villageId: p.villageId,
           name: { ar: `${p.nameAr} - ${p.specialtyAr}`, en: `${p.nameEn} - ${p.specialtyEn}` },
           description: { ar: p.bioAr || p.specialtyAr, en: p.bioEn || p.specialtyEn },
@@ -855,6 +943,7 @@ export default function App() {
         const numeric = parseFloat((p.priceLabelAr || '95').replace(/[^\d.]/g, '')) || 95;
         return {
           id: `prov-groc-${p.id}`,
+          ownerId: p.ownerId,
           villageId: p.villageId,
           name: { ar: p.specialtyAr, en: p.specialtyEn },
           storeName: { ar: p.nameAr, en: p.nameEn },
@@ -873,6 +962,7 @@ export default function App() {
       .filter((p) => p.category === 'tutoring')
       .map((p) => ({
         id: `prov-tut-${p.id}`,
+        ownerId: p.ownerId,
         villageId: p.villageId,
         teacherName: { ar: p.nameAr, en: p.nameEn },
         subject: { ar: p.specialtyAr, en: p.specialtyEn },
@@ -892,6 +982,7 @@ export default function App() {
       .filter((p) => p.category === 'charity')
       .map((p) => ({
         id: `prov-char-${p.id}`,
+        ownerId: p.ownerId,
         villageId: p.villageId,
         name: { ar: p.nameAr, en: p.nameEn },
         focus: { ar: p.specialtyAr, en: p.specialtyEn },
@@ -908,6 +999,7 @@ export default function App() {
       .filter((p) => p.category === 'ride')
       .map((p) => ({
         id: `prov-ride-${p.id}`,
+        ownerId: p.ownerId,
         villageId: p.villageId,
         driverName: { ar: p.nameAr, en: p.nameEn },
         from: { ar: p.neighborhoodAr || 'موقف القرية', en: p.neighborhoodEn || 'Village Square' },
@@ -926,6 +1018,7 @@ export default function App() {
       .filter((p) => p.category === 'other')
       .map((p) => ({
         id: `prov-oth-${p.id}`,
+        ownerId: p.ownerId,
         villageId: p.villageId,
         name: { ar: p.nameAr, en: p.nameEn },
         activityType: { ar: p.specialtyAr, en: p.specialtyEn },
@@ -951,8 +1044,39 @@ export default function App() {
   const pendingAdminCount = useMemo(
     () =>
       mergedProviders.filter((p) => p.status === 'pending').length +
-      firestoreAds.filter((a) => a.status === 'pending').length,
-    [mergedProviders, firestoreAds]
+      firestoreAds.filter((a) => a.status === 'pending').length +
+      bookings.filter(
+        (b) =>
+          b.paymentMethod === 'instapay' &&
+          b.paymentStatus === 'pending_verification' &&
+          b.status !== 'cancelled'
+      ).length,
+    [mergedProviders, firestoreAds, bookings]
+  );
+
+  const providerOrders = useMemo(() => {
+    if (!isSignedIn || effectiveProfile?.role !== 'provider') return [];
+    const nameLower = (effectiveProfile.displayName || '').trim().toLowerCase();
+    return bookings.filter(
+      (b) =>
+        b.providerVisible !== false &&
+        !(b.paymentMethod === 'instapay' && b.paymentStatus !== 'paid') &&
+        b.paymentStatus !== 'rejected' &&
+        ((b.providerOwnerId && b.providerOwnerId === effectiveUid) ||
+          (nameLower.length >= 3 && b.providerName.toLowerCase().includes(nameLower)))
+    );
+  }, [isSignedIn, effectiveProfile?.role, effectiveProfile?.displayName, effectiveUid, bookings]);
+
+  const activeProviderOrdersCount = useMemo(
+    () =>
+      providerOrders.filter(
+        (o) =>
+          o.status === 'pending' ||
+          o.status === 'confirmed' ||
+          o.status === 'preparing' ||
+          o.status === 'on_the_way'
+      ).length,
+    [providerOrders]
   );
 
   // Live Notifications for Signed-In User
@@ -985,6 +1109,27 @@ export default function App() {
             : 'New submitted ads await your approval in the Admin Panel.'
         });
       }
+      const pendingInstaPay = bookings.filter(
+        (b) =>
+          b.paymentMethod === 'instapay' &&
+          b.paymentStatus === 'pending_verification' &&
+          b.status !== 'cancelled'
+      ).length;
+      if (pendingInstaPay > 0) {
+        list.push({
+          id: `admin-instapay-${pendingInstaPay}`,
+          type: 'admin',
+          tone: 'warning',
+          title:
+            lang === 'ar'
+              ? `تحويلات InstaPay بانتظار الاعتماد (${pendingInstaPay})`
+              : `${pendingInstaPay} InstaPay Transfer(s) Pending Review`,
+          body:
+            lang === 'ar'
+              ? 'راجع طلبات الدفع عبر InstaPay في لوحة الأدمن وتأكد من وصول التحويل قبل إرسالها لمقدم الخدمة.'
+              : 'Verify InstaPay transfers in the Admin Panel before releasing orders to providers.'
+        });
+      }
     }
 
     if (isCurrentUserBanned) {
@@ -1010,6 +1155,22 @@ export default function App() {
     }
 
     if (effectiveProfile?.role === 'provider') {
+      if (activeProviderOrdersCount > 0) {
+        list.push({
+          id: `prov-incoming-${activeProviderOrdersCount}`,
+          type: 'booking',
+          tone: 'warning',
+          title:
+            lang === 'ar'
+              ? `لديك ${activeProviderOrdersCount} طلبات واردة جديدة`
+              : `You have ${activeProviderOrdersCount} incoming order(s)`,
+          body:
+            lang === 'ar'
+              ? 'راجع تبويب "طلبات النشاط" في لوحة عملك لتأكيد الطلبات ومتابعة التسليم والتحصيل.'
+              : 'Review the "Orders" tab in your Provider Portal to confirm orders and track fulfillment.'
+        });
+      }
+
       if (effectiveProfile.providerStatus === 'approved') {
         list.push({
           id: 'prov-status-approved',
@@ -1080,11 +1241,28 @@ export default function App() {
     bookings
       .filter((b) => b.ownerId === effectiveUid || normalizePhone(b.customerPhone) === normalizePhone(effectiveProfile?.phone || ''))
       .forEach((b) => {
+        const isPendingInstaPay =
+          b.paymentMethod === 'instapay' && b.paymentStatus === 'pending_verification';
+        const isRejectedPayment = b.paymentStatus === 'rejected';
+        const statusText = isPendingInstaPay
+          ? lang === 'ar'
+            ? 'قيد المراجعة — بانتظار تأكيد الإدارة لتحويل InstaPay'
+            : 'Under Review — Awaiting Admin InstaPay verification'
+          : isRejectedPayment
+          ? lang === 'ar'
+            ? 'تم رفض التحويل'
+            : 'Payment Rejected'
+          : getServiceStatusLabel(b.status, b.serviceType, lang);
         list.push({
-          id: `booking-${b.id}`,
+          id: `booking-${b.id}-${b.status}-${b.paymentStatus || 'std'}`,
           type: 'booking',
-          tone: 'success',
-          title: b.title,
+          tone:
+            b.status === 'cancelled' || isRejectedPayment
+              ? 'danger'
+              : b.status === 'completed' || b.status === 'confirmed'
+              ? 'success'
+              : 'warning',
+          title: `${b.title} — ${statusText}`,
           body: `${b.providerName}${b.totalAmountEgp ? ` · ${b.totalAmountEgp} ${lang === 'ar' ? 'ج.م' : 'EGP'}` : ''}`,
           meta: [b.date, b.time].filter(Boolean).join(' · ')
         });
@@ -1103,6 +1281,7 @@ export default function App() {
     effectiveProfile,
     userProfile,
     profileLoaded,
+    activeProviderOrdersCount,
     allAds,
     bookings,
     lang
@@ -1126,9 +1305,18 @@ export default function App() {
 
   // Save Booking to Firestore (when real Firebase user signed in) + Local State
   const persistBooking = async (booking: BookingRequest) => {
+    const providerVisible =
+      typeof booking.providerVisible === 'boolean'
+        ? booking.providerVisible
+        : booking.paymentMethod !== 'instapay';
     const withOwner: BookingRequest = effectiveUid
-      ? { ...booking, ownerId: booking.ownerId || effectiveUid }
-      : booking;
+      ? {
+          ...booking,
+          ownerId: booking.ownerId || effectiveUid,
+          providerVisible,
+          settlementStatus: booking.settlementStatus || 'pending'
+        }
+      : { ...booking, providerVisible, settlementStatus: booking.settlementStatus || 'pending' };
     setBookings((prev) => [withOwner, ...prev]);
     if (firebaseUser) {
       try {
@@ -1141,21 +1329,179 @@ export default function App() {
           customerName: booking.customerName.slice(0, 80),
           customerPhone: booking.customerPhone.slice(0, 30),
           status: booking.status,
+          providerVisible,
+          settlementStatus: booking.settlementStatus || 'pending',
           createdAt: serverTimestamp()
         };
+        if (booking.providerOwnerId) payload.providerOwnerId = booking.providerOwnerId.slice(0, 128);
         if (booking.address) payload.address = booking.address.slice(0, 160);
         if (typeof booking.distanceKm === 'number') payload.distanceKm = booking.distanceKm;
         if (typeof booking.deliveryFeeEgp === 'number') payload.deliveryFeeEgp = booking.deliveryFeeEgp;
+        if (typeof booking.codFeeEgp === 'number') payload.codFeeEgp = booking.codFeeEgp;
+        if (typeof booking.subtotalEgp === 'number') payload.subtotalEgp = booking.subtotalEgp;
         if (typeof booking.totalAmountEgp === 'number') payload.totalAmountEgp = booking.totalAmountEgp;
         if (booking.date) payload.date = booking.date.slice(0, 40);
         if (booking.time) payload.time = booking.time.slice(0, 40);
         if (booking.notes) payload.notes = booking.notes.slice(0, 400);
+        if (booking.itemsSummary) payload.itemsSummary = booking.itemsSummary.slice(0, 400);
+        if (booking.paymentMethod) payload.paymentMethod = booking.paymentMethod;
+        if (booking.paymentStatus) payload.paymentStatus = booking.paymentStatus;
+        if (booking.transactionRef) payload.transactionRef = booking.transactionRef.slice(0, 60);
+        if (booking.instaPaySender) payload.instaPaySender = booking.instaPaySender.slice(0, 80);
+        if (booking.instaPayCustomerRef) payload.instaPayCustomerRef = booking.instaPayCustomerRef.slice(0, 80);
+        if (booking.paymentVerifiedAt) payload.paymentVerifiedAt = booking.paymentVerifiedAt.slice(0, 40);
+        if (booking.deliveryConfirmedRef) payload.deliveryConfirmedRef = booking.deliveryConfirmedRef.slice(0, 60);
+        if (booking.deliveryConfirmedAt) payload.deliveryConfirmedAt = booking.deliveryConfirmedAt.slice(0, 40);
 
         await setDoc(doc(db, 'bookings', booking.id), payload);
       } catch (err) {
         console.warn('Firestore booking save warning:', err);
       }
     }
+  };
+
+  // Update Order Status (Admin, Assigned Provider & Customer Cancel)
+  const handleUpdateOrderStatus = async (
+    orderId: string,
+    newStatus: BookingStatus,
+    deliveryMeta?: { deliveryConfirmedRef: string; deliveryConfirmedAt: string }
+  ) => {
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === orderId
+          ? {
+              ...b,
+              status: newStatus,
+              ...(deliveryMeta
+                ? {
+                    deliveryConfirmedRef: deliveryMeta.deliveryConfirmedRef,
+                    deliveryConfirmedAt: deliveryMeta.deliveryConfirmedAt
+                  }
+                : {})
+            }
+          : b
+      )
+    );
+    if (firebaseUser && !orderId.startsWith('book-demo-')) {
+      try {
+        await updateDoc(doc(db, 'bookings', orderId), {
+          status: newStatus,
+          ...(deliveryMeta
+            ? {
+                deliveryConfirmedRef: deliveryMeta.deliveryConfirmedRef.slice(0, 60),
+                deliveryConfirmedAt: deliveryMeta.deliveryConfirmedAt.slice(0, 40)
+              }
+            : {})
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `bookings/${orderId}`);
+      }
+    }
+  };
+
+  // Admin: Verify or Reject InstaPay Transfer before Releasing Order to Service Provider
+  const handleVerifyInstaPayPayment = async (
+    orderId: string,
+    decision: 'approve' | 'reject'
+  ) => {
+    const verifiedAt = new Date().toISOString().split('T')[0];
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === orderId
+          ? decision === 'approve'
+            ? {
+                ...b,
+                paymentStatus: 'paid',
+                providerVisible: true,
+                paymentVerifiedAt: verifiedAt
+              }
+            : {
+                ...b,
+                paymentStatus: 'rejected',
+                providerVisible: false,
+                status: 'cancelled'
+              }
+          : b
+      )
+    );
+    if (firebaseUser && !orderId.startsWith('book-demo-')) {
+      try {
+        await updateDoc(
+          doc(db, 'bookings', orderId),
+          decision === 'approve'
+            ? {
+                paymentStatus: 'paid',
+                providerVisible: true,
+                paymentVerifiedAt: verifiedAt
+              }
+            : {
+                paymentStatus: 'rejected',
+                providerVisible: false,
+                status: 'cancelled'
+              }
+        );
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `bookings/${orderId}`);
+      }
+    }
+  };
+
+  // Admin: Route / Assign Order to a Service Provider
+  const handleAssignOrderProvider = async (
+    orderId: string,
+    providerOwnerId: string,
+    providerName: string
+  ) => {
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === orderId
+          ? {
+              ...b,
+              providerOwnerId: providerOwnerId || undefined,
+              providerName: providerName || b.providerName
+            }
+          : b
+      )
+    );
+    if (firebaseUser && !orderId.startsWith('book-demo-')) {
+      try {
+        await updateDoc(doc(db, 'bookings', orderId), {
+          providerOwnerId: providerOwnerId || '',
+          providerName: providerName.slice(0, 100)
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `bookings/${orderId}`);
+      }
+    }
+  };
+
+  // Admin: Mark Provider Orders Settled Financially
+  const handleSettleOrders = async (orderIds: string[]) => {
+    if (orderIds.length === 0) return;
+    const today = new Date().toISOString().split('T')[0];
+    const idSet = new Set(orderIds);
+    setBookings((prev) =>
+      prev.map((b) =>
+        idSet.has(b.id) ? { ...b, settlementStatus: 'settled', settledAt: today } : b
+      )
+    );
+    if (firebaseUser) {
+      for (const orderId of orderIds) {
+        if (orderId.startsWith('book-demo-')) continue;
+        try {
+          await updateDoc(doc(db, 'bookings', orderId), {
+            settlementStatus: 'settled',
+            settledAt: today
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `bookings/${orderId}`);
+        }
+      }
+    }
+  };
+
+  const handleCommissionRateChange = (ratePercent: number) => {
+    setAdPricing((prev) => ({ ...prev, commissionRatePercent: ratePercent }));
   };
 
   // Review Handlers
@@ -1310,7 +1656,14 @@ export default function App() {
   };
 
   // Cart actions
-  const handleAddToCart = (item: { id: string; name: string; price: number; type: 'food' | 'pharmacy' | 'grocery' | 'farm' }) => {
+  const handleAddToCart = (item: {
+    id: string;
+    name: string;
+    price: number;
+    type: 'food' | 'pharmacy' | 'grocery' | 'farm';
+    providerName?: string;
+    providerOwnerId?: string;
+  }) => {
     requireAuth(() => {
       updateCartStateAndStorage((prev) => {
         const existing = prev.find((i) => i.id === item.id);
@@ -1338,62 +1691,75 @@ export default function App() {
     updateCartStateAndStorage(() => []);
   };
 
-  const handleCheckoutSuccess = (order: {
-    name: string;
-    phone: string;
-    address: string;
-    distanceKm: number;
-    deliveryFeeEgp: number;
-    total: number;
-    items: CartItem[];
-  }) => {
+  // Navigate to Payment Page before finalizing order
+  const handleProceedToPayment = (pendingOrder: PendingPaymentOrder) => {
     if (isCurrentUserBanned) return;
-    const newBooking: BookingRequest = {
-      id: `order-${Date.now()}`,
-      villageId: activeVillage.id,
-      serviceType: order.items[0]?.type || 'food',
-      title: `${lang === 'ar' ? 'طلب مشتريات وتوصيل منزلي' : 'Village Delivery Order'} (${order.items.length} ${lang === 'ar' ? 'أصناف' : 'items'})`,
-      providerName: lang === 'ar' ? `مطابخ ومتاجر ${activeVillage.nameAr}` : `${activeVillage.nameEn} Merchants`,
-      customerName: order.name,
-      customerPhone: order.phone,
-      address: order.address,
-      distanceKm: order.distanceKm,
-      deliveryFeeEgp: order.deliveryFeeEgp,
-      totalAmountEgp: order.total,
-      totalAmount: `${order.total.toFixed(0)} ${t.currency}`,
-      date: new Date().toLocaleDateString(),
-      status: 'confirmed',
-      createdAt: new Date().toLocaleDateString()
-    };
-    persistBooking(newBooking);
+    setPendingPayment(pendingOrder);
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {
+      // Ignore scroll error
+    }
   };
 
-  const handlePrescriptionSent = (info: {
-    name: string;
-    phone: string;
-    address: string;
-    notes: string;
-    distanceKm: number;
-    deliveryFeeEgp: number;
+  // Complete order only AFTER payment succeeds on PaymentPage
+  const handlePaymentCompleted = (result: {
+    paymentMethod: PaymentMethod;
+    paymentStatus: PaymentStatus;
+    transactionRef: string;
+    codFeeEgp: number;
+    finalTotalAmountEgp: number;
+    instaPaySender?: string;
+    instaPayCustomerRef?: string;
   }) => {
-    if (isCurrentUserBanned) return;
+    if (!pendingPayment) return;
+
+    const prefix =
+      pendingPayment.source === 'cart'
+        ? 'order'
+        : pendingPayment.source === 'prescription'
+        ? 'rx'
+        : 'book';
+
     const newBooking: BookingRequest = {
-      id: `rx-${Date.now()}`,
+      id: `${prefix}-${Date.now()}`,
+      ownerId: effectiveUid || undefined,
+      providerOwnerId: pendingPayment.providerOwnerId,
       villageId: activeVillage.id,
-      serviceType: 'pharmacy',
-      title: lang === 'ar' ? 'صرف وتوصيل روشتة طبية' : 'Prescription Fulfillment & Delivery',
-      providerName: lang === 'ar' ? `صيدلية الشفاء - ${activeVillage.nameAr}` : `Al-Shifa Pharmacy - ${activeVillage.nameEn}`,
-      customerName: info.name,
-      customerPhone: info.phone,
-      address: info.address,
-      distanceKm: info.distanceKm,
-      deliveryFeeEgp: info.deliveryFeeEgp,
-      date: new Date().toLocaleDateString(),
-      notes: info.notes,
-      status: 'confirmed',
-      createdAt: new Date().toLocaleDateString()
+      serviceType: pendingPayment.serviceType,
+      title: pendingPayment.title,
+      providerName: pendingPayment.providerName,
+      customerName: pendingPayment.customerName,
+      customerPhone: pendingPayment.customerPhone,
+      address: pendingPayment.address,
+      distanceKm: pendingPayment.distanceKm,
+      deliveryFeeEgp: pendingPayment.deliveryFeeEgp,
+      codFeeEgp: result.codFeeEgp,
+      subtotalEgp: pendingPayment.subtotalEgp,
+      totalAmountEgp: result.finalTotalAmountEgp,
+      totalAmount: `${result.finalTotalAmountEgp.toFixed(0)} ${t.currency}`,
+      date: pendingPayment.date,
+      time: pendingPayment.time,
+      notes: pendingPayment.notes,
+      itemsSummary: pendingPayment.itemsSummary,
+      paymentMethod: result.paymentMethod,
+      paymentStatus: result.paymentStatus,
+      providerVisible: result.paymentMethod !== 'instapay',
+      instaPaySender: result.instaPaySender,
+      instaPayCustomerRef: result.instaPayCustomerRef,
+      transactionRef: result.transactionRef,
+      settlementStatus: 'pending',
+      status: 'pending',
+      createdAt: new Date().toISOString().split('T')[0]
     };
+
     persistBooking(newBooking);
+    if (pendingPayment.source === 'cart') {
+      handleClearCart();
+    }
+    setPendingPayment(null);
+    setRecentlyCompletedOrderId(newBooking.id);
+    setIsOrderStatusOpen(true);
   };
 
   // Booking Modals
@@ -1405,8 +1771,10 @@ export default function App() {
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'doctor',
+        providerOwnerId: docItem.ownerId,
         providerName: docItem.name[lang],
-        title: `${t.bookClinicVisit}: ${docItem.specialty[lang]}`
+        title: `${t.bookClinicVisit}: ${docItem.specialty[lang]}`,
+        feeEgp: parsePriceEgp(docItem.fee[lang], 100)
       });
       setIsBookingOpen(true);
     });
@@ -1416,8 +1784,10 @@ export default function App() {
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'technician',
+        providerOwnerId: tech.ownerId,
         providerName: tech.name[lang],
-        title: `${t.requestRepair}: ${tech.craft[lang]}`
+        title: `${t.requestRepair}: ${tech.craft[lang]}`,
+        feeEgp: parsePriceEgp(tech.hourlyRate[lang], 70)
       });
       setIsBookingOpen(true);
     });
@@ -1427,8 +1797,10 @@ export default function App() {
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'ride',
+        providerOwnerId: ride.ownerId,
         providerName: ride.driverName[lang],
-        title: `${t.bookSeat} (${ride.from[lang]} -> ${ride.to[lang]})`
+        title: `${t.bookSeat} (${ride.from[lang]} -> ${ride.to[lang]})`,
+        feeEgp: parsePriceEgp(ride.pricePerSeat[lang], 25)
       });
       setIsBookingOpen(true);
     });
@@ -1438,8 +1810,10 @@ export default function App() {
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'tutoring',
+        providerOwnerId: tutor.ownerId,
         providerName: tutor.teacherName[lang],
-        title: `${t.bookLesson}: ${tutor.subject[lang]}`
+        title: `${t.bookLesson}: ${tutor.subject[lang]}`,
+        feeEgp: parsePriceEgp(tutor.feePerSession[lang], 70)
       });
       setIsBookingOpen(true);
     });
@@ -1449,8 +1823,10 @@ export default function App() {
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'charity',
+        providerOwnerId: org.ownerId,
         providerName: org.name[lang],
-        title: `${t.charityAction}: ${org.activeCampaign[lang]}`
+        title: `${t.charityAction}: ${org.activeCampaign[lang]}`,
+        feeEgp: parsePriceEgp(org.donationExample[lang], 50)
       });
       setIsBookingOpen(true);
     });
@@ -1460,8 +1836,10 @@ export default function App() {
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'other',
+        providerOwnerId: svc.ownerId,
         providerName: svc.name[lang],
-        title: `${svc.activityType[lang]} - ${svc.name[lang]}`
+        title: `${svc.activityType[lang]} - ${svc.name[lang]}`,
+        feeEgp: parsePriceEgp(svc.priceLabel[lang], 50)
       });
       setIsBookingOpen(true);
     });
@@ -1538,6 +1916,118 @@ export default function App() {
 
   const activeVillageName = lang === 'ar' ? activeVillage.nameAr : activeVillage.nameEn;
 
+  const userOrders = useMemo(() => {
+    if (!isSignedIn) return [];
+    if (isAdmin) return bookings;
+    const myNormPhone = normalizePhone(effectiveProfile?.phone || '');
+    return bookings.filter(
+      (b) =>
+        b.ownerId === effectiveUid ||
+        (myNormPhone.length >= 8 && normalizePhone(b.customerPhone) === myNormPhone)
+    );
+  }, [isSignedIn, isAdmin, bookings, effectiveUid, effectiveProfile?.phone]);
+
+  const activeOrdersCount = useMemo(
+    () =>
+      userOrders.filter(
+        (o) =>
+          o.status === 'pending' ||
+          o.status === 'confirmed' ||
+          o.status === 'preparing' ||
+          o.status === 'on_the_way'
+      ).length,
+    [userOrders]
+  );
+
+  const isProviderMode = Boolean(
+    isSignedIn && !isAdmin && effectiveProfile?.role === 'provider'
+  );
+
+  const activeProviderListing = useMemo(
+    () =>
+      isProviderMode && effectiveUid
+        ? mergedProviders.find((p) => p.ownerId === effectiveUid || p.id === effectiveUid)
+        : undefined,
+    [isProviderMode, effectiveUid, mergedProviders]
+  );
+
+  const providerReviews = useMemo(() => {
+    if (!isProviderMode || !effectiveUid) return [];
+    const candidateIds = new Set<string>([effectiveUid]);
+    if (activeProviderListing) {
+      candidateIds.add(activeProviderListing.id);
+      candidateIds.add(`prov-${activeProviderListing.id}`);
+    }
+    return reviews.filter((r) => candidateIds.has(r.targetId));
+  }, [isProviderMode, effectiveUid, activeProviderListing, reviews]);
+
+  // Dedicated Payment Page Gate before Order Completion
+  if (pendingPayment) {
+    return (
+      <PaymentPage
+        lang={lang}
+        activeVillage={activeVillage}
+        order={pendingPayment}
+        onBackToOrder={() => setPendingPayment(null)}
+        onPaymentCompleted={handlePaymentCompleted}
+      />
+    );
+  }
+
+  // Completely Separate Service Provider Portal (Shows ONLY activity status & order details)
+  if (isProviderMode && effectiveProfile) {
+    return (
+      <>
+        <ProviderWorkspace
+          lang={lang}
+          onToggleLang={() => setLang(lang === 'ar' ? 'en' : 'ar')}
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode(!darkMode)}
+          activeVillage={activeVillage}
+          providerProfile={effectiveProfile}
+          providerListing={activeProviderListing}
+          orders={providerOrders}
+          reviews={providerReviews}
+          commissionRatePercent={adPricing.commissionRatePercent ?? 10}
+          notificationsCount={unreadNotificationsCount}
+          isBanned={isCurrentUserBanned}
+          banReason={ownPhoneBan?.reason || effectiveProfile.banReason}
+          banUntilMs={ownPhoneBan?.banUntilMs || effectiveProfile.banUntilMs}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+          onOpenNotifications={() => setIsNotificationsOpen(true)}
+          onOpenAuth={() => openAuthModal('login')}
+        />
+
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          lang={lang}
+          initialMode={authModalMode}
+          firebaseUser={firebaseUser}
+          userProfile={userProfile}
+          activeDemoAccount={activeDemoAccount}
+          onLoginDemoAccount={handleLoginDemoAccount}
+          onLogoutDemoAccount={handleLogoutDemoAccount}
+          isAdmin={isAdmin}
+          isBanned={isCurrentUserBanned}
+          banReason={ownPhoneBan?.reason || effectiveProfile.banReason}
+          banUntilMs={ownPhoneBan?.banUntilMs || effectiveProfile.banUntilMs}
+          onProfileSaved={() => {}}
+          onOpenAdminPanel={() => setIsAdminModalOpen(true)}
+        />
+
+        <NotificationsModal
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          notifications={userNotifications}
+          seenIds={seenNotificationIds}
+          onMarkAllRead={handleMarkAllNotificationsRead}
+          lang={lang}
+        />
+      </>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col selection:bg-amber-500 selection:text-white transition-colors">
       {/* Top Bar Header with Relocated Search */}
@@ -1554,8 +2044,15 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
+        activeOrdersCount={activeOrdersCount}
+        providerOrdersCount={activeProviderOrdersCount}
         notificationsCount={unreadNotificationsCount}
         onOpenCart={() => requireAuth(() => setIsCartModalOpen(true))}
+        onOpenOrders={() => {
+          setRecentlyCompletedOrderId(null);
+          setIsOrderStatusOpen(true);
+        }}
+        onOpenProviderOrders={() => setIsProviderOrdersOpen(true)}
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenEmergency={() => setIsEmergencyModalOpen(true)}
         onOpenAssistant={() => requireAuth(() => setIsAssistantModalOpen(true))}
@@ -1870,6 +2367,11 @@ export default function App() {
           onVillageUpdated={(updated) => setActiveVillage(updated)}
           onDemoUserAction={handleDemoUserAction}
           onDemoProviderDecision={handleDemoProviderDecision}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+          onVerifyInstaPayPayment={handleVerifyInstaPayPayment}
+          onAssignOrderProvider={handleAssignOrderProvider}
+          onSettleOrders={handleSettleOrders}
+          onCommissionRateChange={handleCommissionRateChange}
         />
       )}
 
@@ -1877,13 +2379,26 @@ export default function App() {
         isOpen={isBookingOpen}
         onClose={() => setIsBookingOpen(false)}
         serviceType={bookingDetails.type}
+        providerOwnerId={bookingDetails.providerOwnerId}
         providerName={bookingDetails.providerName}
         serviceTitle={bookingDetails.title}
+        feeEgp={bookingDetails.feeEgp}
         lang={lang}
         defaultName={effectiveProfile?.displayName || firebaseUser?.displayName || ''}
         defaultPhone={effectiveProfile?.phone || ''}
         defaultAddress={effectiveProfile?.address || effectiveProfile?.neighborhood || ''}
-        onConfirmBooking={persistBooking}
+        onProceedToPayment={handleProceedToPayment}
+      />
+
+      <ProviderOrdersModal
+        isOpen={isProviderOrdersOpen}
+        onClose={() => setIsProviderOrdersOpen(false)}
+        lang={lang}
+        activeVillage={activeVillage}
+        providerProfile={effectiveProfile}
+        orders={providerOrders}
+        commissionRatePercent={adPricing.commissionRatePercent ?? 10}
+        onUpdateOrderStatus={handleUpdateOrderStatus}
       />
 
       <PrescriptionUploadModal
@@ -1894,7 +2409,7 @@ export default function App() {
         defaultName={effectiveProfile?.displayName || firebaseUser?.displayName || ''}
         defaultPhone={effectiveProfile?.phone || ''}
         defaultAddress={effectiveProfile?.address || effectiveProfile?.neighborhood || ''}
-        onPrescriptionSent={handlePrescriptionSent}
+        onProceedToPayment={handleProceedToPayment}
       />
 
       <CartModal
@@ -1908,8 +2423,20 @@ export default function App() {
         defaultAddress={effectiveProfile?.address || effectiveProfile?.neighborhood || ''}
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveCartItem}
-        onClearCart={handleClearCart}
-        onCheckoutSuccess={handleCheckoutSuccess}
+        onProceedToPayment={handleProceedToPayment}
+      />
+
+      <OrderStatusModal
+        isOpen={isOrderStatusOpen}
+        onClose={() => {
+          setIsOrderStatusOpen(false);
+          setRecentlyCompletedOrderId(null);
+        }}
+        lang={lang}
+        orders={userOrders}
+        activeVillage={activeVillage}
+        highlightedOrderId={recentlyCompletedOrderId}
+        onCancelOrder={(orderId) => handleUpdateOrderStatus(orderId, 'cancelled')}
       />
 
       <EmergencyDirectoryModal

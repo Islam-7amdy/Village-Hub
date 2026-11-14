@@ -87,7 +87,13 @@ export const TRANSLATIONS = {
     sendSmsCode: 'إرسال كود التأكيد في رسالة SMS',
     verifySmsCode: 'تأكيد الكود والدخول',
     smsOtpLabel: 'كود التأكيد (6 أرقام من الرسالة النصية)',
-    fullAddressLabel: 'العنوان بالتفصيل (الناحية / الشارع / علامة مميزة)'
+    fullAddressLabel: 'العنوان بالتفصيل (الناحية / الشارع / علامة مميزة)',
+    orderStatus: 'حالة الطلبات',
+    providerOrders: 'طلبات نشاطي',
+    financialSettlement: 'التسويات المالية',
+    proceedToPayment: 'المتابعة لصفحة الدفع',
+    paymentPageTitle: 'صفحة الدفع وإتمام الطلب',
+    payNowAndComplete: 'إتمام الدفع وتأكيد الطلب'
   },
   en: {
     appName: 'Noqbas',
@@ -177,6 +183,12 @@ export const TRANSLATIONS = {
     sendSmsCode: 'Send SMS Verification Code',
     verifySmsCode: 'Verify Code & Continue',
     smsOtpLabel: 'SMS Verification Code (6 digits)',
-    fullAddressLabel: 'Full Address (Quarter / Street / Landmark)'
+    fullAddressLabel: 'Full Address (Quarter / Street / Landmark)',
+    orderStatus: 'Order Status',
+    providerOrders: 'Provider Orders',
+    financialSettlement: 'Financial Settlement',
+    proceedToPayment: 'Proceed to Payment Page',
+    paymentPageTitle: 'Payment & Checkout',
+    payNowAndComplete: 'Complete Payment & Place Order'
   }
 };

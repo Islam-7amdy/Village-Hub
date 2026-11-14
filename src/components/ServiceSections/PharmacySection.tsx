@@ -8,7 +8,14 @@ interface PharmacySectionProps {
   lang: Language;
   canUseServices: boolean;
   onRequireLogin: () => void;
-  onAddToCart: (item: { id: string; name: string; price: number; type: 'food' | 'pharmacy' | 'farm' }) => void;
+  onAddToCart: (item: {
+    id: string;
+    name: string;
+    price: number;
+    type: 'food' | 'pharmacy' | 'farm';
+    providerName?: string;
+    providerOwnerId?: string;
+  }) => void;
   onOpenUploadPrescription: () => void;
 }
 
@@ -45,7 +52,13 @@ export const PharmacySection: React.FC<PharmacySectionProps> = ({
       id: item.id,
       name: item.name[lang],
       price: item.price,
-      type: 'pharmacy'
+      type: 'pharmacy',
+      providerName: item.ownerId
+        ? item.name[lang].split(' - ')[0]
+        : lang === 'ar'
+        ? 'صيدلية الشفاء - قرية نقباس'
+        : 'Al-Shifa Pharmacy - Noqbas',
+      providerOwnerId: item.ownerId
     });
     setAddedIds((prev) => ({ ...prev, [item.id]: true }));
     setTimeout(() => {

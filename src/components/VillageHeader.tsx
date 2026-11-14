@@ -29,7 +29,9 @@ import {
   ShoppingBasket,
   GraduationCap,
   HeartHandshake,
-  Shapes
+  Shapes,
+  PackageCheck,
+  Briefcase
 } from 'lucide-react';
 
 interface VillageHeaderProps {
@@ -42,8 +44,12 @@ interface VillageHeaderProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   cartCount: number;
+  activeOrdersCount: number;
+  providerOrdersCount?: number;
   notificationsCount: number;
   onOpenCart: () => void;
+  onOpenOrders: () => void;
+  onOpenProviderOrders?: () => void;
   onOpenNotifications: () => void;
   onOpenEmergency: () => void;
   onOpenAssistant: () => void;
@@ -67,8 +73,12 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
   searchQuery,
   onSearchChange,
   cartCount,
+  activeOrdersCount,
+  providerOrdersCount = 0,
   notificationsCount,
   onOpenCart,
+  onOpenOrders,
+  onOpenProviderOrders,
   onOpenNotifications,
   onOpenEmergency,
   onOpenAssistant,
@@ -184,6 +194,46 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
                 {pendingAdminCount > 0 && (
                   <span className="px-1.5 py-0.2 bg-white text-slate-900 rounded-full text-[10px] font-mono">
                     {pendingAdminCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Signed-in Order Status Tracking Button */}
+            {isSignedIn && (
+              <button
+                type="button"
+                onClick={onOpenOrders}
+                title={t.orderStatus}
+                aria-label={t.orderStatus}
+                className="relative flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <PackageCheck className={`w-4 h-4 ${theme.text}`} />
+                <span className="hidden md:inline">{t.orderStatus}</span>
+                {activeOrdersCount > 0 && (
+                  <span
+                    className={`min-w-[16px] h-4 px-1 rounded-full ${theme.solidBg} text-white text-[10px] font-bold font-mono flex items-center justify-center`}
+                  >
+                    {activeOrdersCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Service Provider Incoming Orders Dashboard Button */}
+            {isSignedIn && userProfile?.role === 'provider' && onOpenProviderOrders && (
+              <button
+                type="button"
+                onClick={onOpenProviderOrders}
+                title={t.providerOrders}
+                aria-label={t.providerOrders}
+                className="relative flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">{t.providerOrders}</span>
+                {providerOrdersCount > 0 && (
+                  <span className="min-w-[16px] h-4 px-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold font-mono flex items-center justify-center">
+                    {providerOrdersCount}
                   </span>
                 )}
               </button>

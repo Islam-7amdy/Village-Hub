@@ -8,7 +8,14 @@ interface GrocerySectionProps {
   lang: Language;
   canUseServices: boolean;
   onRequireLogin: () => void;
-  onAddToCart: (item: { id: string; name: string; price: number; type: 'grocery' }) => void;
+  onAddToCart: (item: {
+    id: string;
+    name: string;
+    price: number;
+    type: 'grocery';
+    providerName?: string;
+    providerOwnerId?: string;
+  }) => void;
 }
 
 export const GrocerySection: React.FC<GrocerySectionProps> = ({
@@ -44,7 +51,9 @@ export const GrocerySection: React.FC<GrocerySectionProps> = ({
       id: item.id,
       name: item.name[lang],
       price: item.price,
-      type: 'grocery'
+      type: 'grocery',
+      providerName: item.storeName[lang],
+      providerOwnerId: item.ownerId
     });
     setAddedIds((prev) => ({ ...prev, [item.id]: true }));
     setTimeout(() => {

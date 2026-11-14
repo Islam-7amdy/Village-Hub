@@ -180,6 +180,7 @@ export interface BannedPhoneRecord {
 export interface PlatformPricingConfig {
   adPriceWeekEgp: number;
   adPriceMonthEgp: number;
+  commissionRatePercent?: number;
 }
 
 export interface ProviderListing {
@@ -233,6 +234,7 @@ export interface ReviewItem {
 
 export interface DoctorService {
   id: string;
+  ownerId?: string;
   villageId: string;
   name: { ar: string; en: string };
   specialty: { ar: string; en: string };
@@ -249,6 +251,7 @@ export interface DoctorService {
 
 export interface TechnicianService {
   id: string;
+  ownerId?: string;
   villageId: string;
   name: { ar: string; en: string };
   craft: { ar: string; en: string };
@@ -266,6 +269,7 @@ export interface TechnicianService {
 
 export interface FoodItem {
   id: string;
+  ownerId?: string;
   villageId: string;
   name: { ar: string; en: string };
   description: { ar: string; en: string };
@@ -278,6 +282,7 @@ export interface FoodItem {
 
 export interface PharmacyItem {
   id: string;
+  ownerId?: string;
   villageId: string;
   name: { ar: string; en: string };
   description: { ar: string; en: string };
@@ -290,6 +295,7 @@ export interface PharmacyItem {
 
 export interface GroceryItem {
   id: string;
+  ownerId?: string;
   villageId: string;
   name: { ar: string; en: string };
   storeName: { ar: string; en: string };
@@ -302,6 +308,7 @@ export interface GroceryItem {
 
 export interface TutoringService {
   id: string;
+  ownerId?: string;
   villageId: string;
   teacherName: { ar: string; en: string };
   subject: { ar: string; en: string };
@@ -316,6 +323,7 @@ export interface TutoringService {
 
 export interface CharityOrg {
   id: string;
+  ownerId?: string;
   villageId: string;
   name: { ar: string; en: string };
   focus: { ar: string; en: string };
@@ -349,6 +357,7 @@ export interface VillageAnnouncement {
 
 export interface VillageRide {
   id: string;
+  ownerId?: string;
   villageId: string;
   driverName: { ar: string; en: string };
   from: { ar: string; en: string };
@@ -362,6 +371,7 @@ export interface VillageRide {
 
 export interface OtherService {
   id: string;
+  ownerId?: string;
   villageId: string;
   name: { ar: string; en: string };
   activityType: { ar: string; en: string };
@@ -372,25 +382,218 @@ export interface OtherService {
   phone: string;
 }
 
+export type BookingStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'preparing'
+  | 'on_the_way'
+  | 'completed'
+  | 'cancelled';
+
+export type PaymentMethod = 'card' | 'vodafone_cash' | 'instapay' | 'cod';
+export type PaymentStatus = 'paid' | 'pending_verification' | 'pending_cod' | 'rejected';
+export type SettlementStatus = 'pending' | 'settled';
+
 export interface BookingRequest {
   id: string;
   ownerId?: string;
   villageId?: string;
   serviceType: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride';
   title: string;
+  providerOwnerId?: string;
   providerName: string;
   customerName: string;
   customerPhone: string;
   address: string;
   distanceKm?: number;
   deliveryFeeEgp?: number;
+  codFeeEgp?: number;
+  subtotalEgp?: number;
   totalAmountEgp?: number;
   date: string;
   time?: string;
   notes?: string;
+  itemsSummary?: string;
   totalAmount?: string;
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  paymentMethod?: PaymentMethod;
+  paymentStatus?: PaymentStatus;
+  providerVisible?: boolean;
+  instaPaySender?: string;
+  instaPayCustomerRef?: string;
+  paymentVerifiedAt?: string;
+  transactionRef?: string;
+  deliveryConfirmedRef?: string;
+  deliveryConfirmedAt?: string;
+  settlementStatus?: SettlementStatus;
+  settledAt?: string;
+  adminNotes?: string;
+  status: BookingStatus;
   createdAt: string;
+}
+
+export function isDeliveryServiceType(serviceType: BookingRequest['serviceType']): boolean {
+  return (
+    serviceType === 'food' ||
+    serviceType === 'pharmacy' ||
+    serviceType === 'grocery' ||
+    serviceType === 'farm'
+  );
+}
+
+export function getAllowedStatusesForService(
+  serviceType: BookingRequest['serviceType']
+): BookingStatus[] {
+  if (isDeliveryServiceType(serviceType)) {
+    return ['pending', 'confirmed', 'preparing', 'on_the_way', 'completed', 'cancelled'];
+  }
+  if (serviceType === 'technician' || serviceType === 'ride') {
+    return ['pending', 'confirmed', 'on_the_way', 'completed', 'cancelled'];
+  }
+  return ['pending', 'confirmed', 'completed', 'cancelled'];
+}
+
+export function getServiceStatusLabel(
+  status: BookingStatus,
+  serviceType: BookingRequest['serviceType'] | undefined,
+  lang: Language
+): string {
+  const st = serviceType || 'other';
+  if (st === 'doctor') {
+    switch (status) {
+      case 'pending':
+        return lang === 'ar' ? 'بانتظار تأكيد الحجز' : 'Pending Confirmation';
+      case 'confirmed':
+        return lang === 'ar' ? 'تم تأكيد الموعد' : 'Appointment Confirmed';
+      case 'completed':
+        return lang === 'ar' ? 'تم الكشف' : 'Visit Completed';
+      case 'cancelled':
+        return lang === 'ar' ? 'ملغي' : 'Cancelled';
+      default:
+        return lang === 'ar' ? 'تم تأكيد الموعد' : 'Confirmed';
+    }
+  }
+  if (st === 'technician') {
+    switch (status) {
+      case 'pending':
+        return lang === 'ar' ? 'بانتظار تأكيد الفني' : 'Pending Confirmation';
+      case 'confirmed':
+        return lang === 'ar' ? 'تم تأكيد الزيارة' : 'Visit Confirmed';
+      case 'on_the_way':
+        return lang === 'ar' ? 'الفني في الطريق' : 'Technician En Route';
+      case 'completed':
+        return lang === 'ar' ? 'تم إنجاز الصيانة' : 'Repair Completed';
+      case 'cancelled':
+        return lang === 'ar' ? 'ملغي' : 'Cancelled';
+      default:
+        return lang === 'ar' ? 'تم تأكيد الزيارة' : 'Confirmed';
+    }
+  }
+  if (st === 'ride') {
+    switch (status) {
+      case 'pending':
+        return lang === 'ar' ? 'بانتظار تأكيد السائق' : 'Pending Driver';
+      case 'confirmed':
+        return lang === 'ar' ? 'تم حجز المقعد' : 'Seat Confirmed';
+      case 'on_the_way':
+        return lang === 'ar' ? 'الرحلة جارية' : 'Trip In Progress';
+      case 'completed':
+        return lang === 'ar' ? 'تم الوصول' : 'Arrived';
+      case 'cancelled':
+        return lang === 'ar' ? 'ملغي' : 'Cancelled';
+      default:
+        return lang === 'ar' ? 'تم حجز المقعد' : 'Confirmed';
+    }
+  }
+  if (!isDeliveryServiceType(st)) {
+    switch (status) {
+      case 'pending':
+        return lang === 'ar' ? 'قيد المراجعة' : 'Pending Review';
+      case 'confirmed':
+        return lang === 'ar' ? 'تم التأكيد' : 'Confirmed';
+      case 'completed':
+        return lang === 'ar' ? 'مكتمل' : 'Completed';
+      case 'cancelled':
+        return lang === 'ar' ? 'ملغي' : 'Cancelled';
+      default:
+        return lang === 'ar' ? 'تم التأكيد' : 'Confirmed';
+    }
+  }
+
+  switch (status) {
+    case 'pending':
+      return lang === 'ar' ? 'قيد المراجعة' : 'Pending Review';
+    case 'confirmed':
+      return lang === 'ar' ? 'تم قبول الطلب' : 'Order Accepted';
+    case 'preparing':
+      return lang === 'ar' ? 'جاري تجهيز الطلب' : 'Preparing Order';
+    case 'on_the_way':
+      return lang === 'ar' ? 'في الطريق للتسليم' : 'Out for Delivery';
+    case 'completed':
+      return lang === 'ar' ? 'تم التسليم' : 'Delivered';
+    case 'cancelled':
+      return lang === 'ar' ? 'ملغي' : 'Cancelled';
+    default:
+      return status;
+  }
+}
+
+export function getServiceTimelineSteps(
+  serviceType: BookingRequest['serviceType']
+): { key: BookingStatus; labelAr: string; labelEn: string }[] {
+  const allowed = getAllowedStatusesForService(serviceType).filter((s) => s !== 'cancelled');
+  return allowed.map((key) => ({
+    key,
+    labelAr: getServiceStatusLabel(key, serviceType, 'ar'),
+    labelEn: getServiceStatusLabel(key, serviceType, 'en')
+  }));
+}
+
+export function matchesDeliveryReference(inputRef: string, expectedRef?: string): boolean {
+  const cleanInput = inputRef.trim().replace(/^#/, '').toUpperCase();
+  if (cleanInput.length < 4) return false;
+  if (!expectedRef || !expectedRef.trim()) return true;
+  const cleanExpected = expectedRef.trim().replace(/^#/, '').toUpperCase();
+  if (cleanInput === cleanExpected) return true;
+  const expectedSuffix = cleanExpected.includes('-')
+    ? cleanExpected.split('-').pop() || cleanExpected
+    : cleanExpected;
+  return cleanInput === expectedSuffix || (cleanInput.length >= 4 && cleanExpected.endsWith(cleanInput));
+}
+
+export function maskReferenceCode(ref?: string): string {
+  if (!ref) return '••••••';
+  const clean = ref.trim();
+  if (clean.length <= 2) return '••••';
+  return `••••${clean.slice(-2)}`;
+}
+
+export interface PendingPaymentOrder {
+  source: 'cart' | 'booking' | 'prescription';
+  serviceType: BookingRequest['serviceType'];
+  title: string;
+  providerOwnerId?: string;
+  providerName: string;
+  customerName: string;
+  customerPhone: string;
+  address: string;
+  distanceKm?: number;
+  deliveryFeeEgp?: number;
+  subtotalEgp: number;
+  totalAmountEgp: number;
+  date: string;
+  time?: string;
+  notes?: string;
+  itemsSummary?: string;
+  cartItems?: { id: string; name: string; price: number; quantity: number }[];
+}
+
+export function parsePriceEgp(priceLabel?: string, fallback = 50): number {
+  if (!priceLabel) return fallback;
+  const normalized = priceLabel.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+  const match = normalized.match(/(\d+(?:\.\d+)?)/);
+  if (!match) return fallback;
+  const val = Number(match[1]);
+  return Number.isFinite(val) && val > 0 ? Math.round(val) : fallback;
 }
 
 export function calculateDeliveryFeeEgp(
@@ -609,7 +812,14 @@ export const TEST_DEMO_BOOKINGS: BookingRequest[] = [
     address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
     date: '2026-11-14',
     time: '10:00 AM',
+    subtotalEgp: 100,
     totalAmountEgp: 100,
+    paymentMethod: 'instapay',
+    paymentStatus: 'paid',
+    providerVisible: true,
+    paymentVerifiedAt: '2026-11-13',
+    transactionRef: 'NQB-849201',
+    itemsSummary: 'كشف عيادة باطنة وأسرة',
     status: 'confirmed',
     createdAt: '2026-11-13'
   },
@@ -625,10 +835,17 @@ export const TEST_DEMO_BOOKINGS: BookingRequest[] = [
     address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
     distanceKm: 0.5,
     deliveryFeeEgp: 13,
+    subtotalEgp: 140,
     totalAmountEgp: 153,
+    paymentMethod: 'instapay',
+    paymentStatus: 'paid',
+    providerVisible: true,
+    paymentVerifiedAt: '2026-11-14',
+    transactionRef: 'NQB-849315',
+    itemsSummary: 'فطير مشلتت فلاحي بالسمن البلدي ×1',
     date: '2026-11-14',
     time: '01:30 PM',
-    status: 'completed',
+    status: 'on_the_way',
     createdAt: '2026-11-14'
   },
   {
@@ -643,10 +860,17 @@ export const TEST_DEMO_BOOKINGS: BookingRequest[] = [
     address: 'قرية نقباس - الناحية الشرقية طريق الترعة',
     distanceKm: 1.5,
     deliveryFeeEgp: 18,
+    subtotalEgp: 230,
     totalAmountEgp: 248,
+    paymentMethod: 'instapay',
+    paymentStatus: 'paid',
+    providerVisible: true,
+    paymentVerifiedAt: '2026-11-14',
+    transactionRef: 'NQB-849422',
+    itemsSummary: 'مستلزمات أطفال وفيتامينات',
     date: '2026-11-14',
     time: '04:00 PM',
-    status: 'confirmed',
+    status: 'preparing',
     createdAt: '2026-11-14'
   },
   {
@@ -661,7 +885,14 @@ export const TEST_DEMO_BOOKINGS: BookingRequest[] = [
     address: 'قرية نقباس - الناحية الشرقية طريق الترعة',
     date: '2026-11-15',
     time: '11:00 AM',
-    totalAmountEgp: 80,
+    subtotalEgp: 80,
+    codFeeEgp: 10,
+    totalAmountEgp: 90,
+    paymentMethod: 'cod',
+    paymentStatus: 'pending_cod',
+    providerVisible: true,
+    transactionRef: 'COD-849509',
+    itemsSummary: 'معاينة وصيانة كهرباء منزلية',
     status: 'pending',
     createdAt: '2026-11-14'
   },
@@ -677,10 +908,125 @@ export const TEST_DEMO_BOOKINGS: BookingRequest[] = [
     address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
     distanceKm: 0.5,
     deliveryFeeEgp: 13,
-    totalAmountEgp: 318,
+    subtotalEgp: 305,
+    codFeeEgp: 10,
+    totalAmountEgp: 328,
+    paymentMethod: 'cod',
+    paymentStatus: 'pending_cod',
+    providerVisible: true,
+    transactionRef: 'COD-849104',
+    deliveryConfirmedRef: 'COD-849104',
+    deliveryConfirmedAt: '2026-11-14',
+    itemsSummary: 'سلة خضار ومقاضي أساسية',
     date: '2026-11-14',
     time: '06:00 PM',
     status: 'completed',
+    settlementStatus: 'pending',
+    createdAt: '2026-11-14'
+  },
+  {
+    id: 'book-demo-6',
+    ownerId: 'test-user-2',
+    villageId: 'noqbas',
+    serviceType: 'doctor',
+    title: 'حجز كشف في العيادة / زيارة: طب وجراحة الفم والأسنان',
+    providerOwnerId: 'test-prov-1',
+    providerName: 'د. كريم الشناوي',
+    customerName: 'سارة حسن',
+    customerPhone: '01022222222',
+    address: 'قرية نقباس - الناحية الشرقية طريق الترعة',
+    date: '2026-11-15',
+    time: '05:30 PM',
+    subtotalEgp: 150,
+    totalAmountEgp: 150,
+    paymentMethod: 'instapay',
+    paymentStatus: 'paid',
+    providerVisible: true,
+    paymentVerifiedAt: '2026-11-14',
+    transactionRef: 'NQB-912044',
+    itemsSummary: 'كشف وحشو عصب أسنان',
+    status: 'confirmed',
+    settlementStatus: 'pending',
+    createdAt: '2026-11-14'
+  },
+  {
+    id: 'book-demo-7',
+    ownerId: 'test-user-1',
+    villageId: 'noqbas',
+    serviceType: 'technician',
+    title: 'اطلب صنايعي للبيت: سباكة صحية وصيانة مواتير ميه',
+    providerOwnerId: 'test-prov-2',
+    providerName: 'الأسطى عادل نجار',
+    customerName: 'أحمد محمود',
+    customerPhone: '01011111111',
+    address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
+    date: '2026-11-15',
+    time: '12:00 PM',
+    subtotalEgp: 80,
+    codFeeEgp: 10,
+    totalAmountEgp: 90,
+    paymentMethod: 'cod',
+    paymentStatus: 'pending_cod',
+    providerVisible: true,
+    transactionRef: 'COD-912188',
+    itemsSummary: 'صيانة موتور ميه وتغيير أوتوماتيك',
+    status: 'pending',
+    settlementStatus: 'pending',
+    createdAt: '2026-11-14'
+  },
+  {
+    id: 'book-demo-8',
+    ownerId: 'test-user-1',
+    villageId: 'noqbas',
+    serviceType: 'food',
+    title: 'طلب طعام: صينية بط ومحشي بيتي',
+    providerOwnerId: 'test-prov-1',
+    providerName: 'مطبخ أم سالم للأكل البيتي',
+    customerName: 'أحمد محمود',
+    customerPhone: '01011111111',
+    address: 'قرية نقباس - وسط البلد أمام المسجد الكبير',
+    distanceKm: 1.5,
+    deliveryFeeEgp: 18,
+    subtotalEgp: 420,
+    totalAmountEgp: 438,
+    paymentMethod: 'instapay',
+    paymentStatus: 'pending_verification',
+    providerVisible: false,
+    instaPaySender: '01011111111',
+    instaPayCustomerRef: 'IPN-7741',
+    transactionRef: 'NQB-912555',
+    itemsSummary: 'صينية بط ومحشي ورق عنب وكرنب بيتي ×1',
+    date: '2026-11-15',
+    time: '02:00 PM',
+    status: 'pending',
+    settlementStatus: 'pending',
+    createdAt: '2026-11-14'
+  },
+  {
+    id: 'book-demo-9',
+    ownerId: 'test-user-2',
+    villageId: 'noqbas',
+    serviceType: 'grocery',
+    title: 'طلب بقالة: سلة خضار ومنتجات ألبان',
+    providerOwnerId: 'test-prov-1',
+    providerName: 'سوبر ماركت البركة',
+    customerName: 'سارة حسن',
+    customerPhone: '01022222222',
+    address: 'قرية نقباس - الناحية الشرقية طريق الترعة',
+    distanceKm: 1.5,
+    deliveryFeeEgp: 18,
+    subtotalEgp: 235,
+    codFeeEgp: 10,
+    totalAmountEgp: 263,
+    paymentMethod: 'cod',
+    paymentStatus: 'pending_cod',
+    providerVisible: true,
+    transactionRef: 'COD-912777',
+    itemsSummary: 'زيت ذرة صافي + زجاجة سمن طبيعي ×1',
+    date: '2026-11-15',
+    time: '03:15 PM',
+    status: 'on_the_way',
+    settlementStatus: 'pending',
     createdAt: '2026-11-14'
   }
 ];

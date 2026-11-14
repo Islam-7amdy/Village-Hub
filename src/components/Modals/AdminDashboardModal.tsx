@@ -6,6 +6,7 @@ import {
   UserProfile,
   BannedPhoneRecord,
   BookingRequest,
+  BookingStatus,
   PlatformPricingConfig,
   ProviderListing,
   ReviewItem,
@@ -18,10 +19,13 @@ import {
   getVillageTheme,
   normalizePhone,
   isBanCurrentlyActive,
-  isAdExpired
+  isAdExpired,
+  getAllowedStatusesForService,
+  getServiceStatusLabel
 } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
 import { VillageLogo, renderVillageLogoGlyph } from '../VillageLogo';
+import { getStatusLabel, getPaymentMethodLabel } from './OrderStatusModal';
 import {
   X,
   ShieldCheck,
@@ -43,7 +47,15 @@ import {
   Truck,
   TrendingUp,
   Award,
-  Activity
+  Activity,
+  PackageCheck,
+  CreditCard,
+  Wallet,
+  UserPlus,
+  Landmark,
+  Banknote,
+  KeyRound,
+  ShieldAlert
 } from 'lucide-react';
 
 export type DemoUserAdminAction =
@@ -78,6 +90,15 @@ interface AdminDashboardModalProps {
   onVillageUpdated: (village: VillageConfig) => void;
   onDemoUserAction?: (action: DemoUserAdminAction) => void;
   onDemoProviderDecision?: (providerId: string, decision: 'approved' | 'rejected') => void;
+  onUpdateOrderStatus?: (
+    orderId: string,
+    status: BookingStatus,
+    deliveryMeta?: { deliveryConfirmedRef: string; deliveryConfirmedAt: string }
+  ) => void;
+  onVerifyInstaPayPayment?: (orderId: string, decision: 'approve' | 'reject') => void;
+  onAssignOrderProvider?: (orderId: string, providerOwnerId: string, providerName: string) => void;
+  onSettleOrders?: (orderIds: string[]) => void;
+  onCommissionRateChange?: (ratePercent: number) => void;
 }
 
 export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
@@ -96,13 +117,23 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   nowMs,
   onVillageUpdated,
   onDemoUserAction,
-  onDemoProviderDecision
+  onDemoProviderDecision,
+  onUpdateOrderStatus,
+  onVerifyInstaPayPayment,
+  onAssignOrderProvider,
+  onSettleOrders,
+  onCommissionRateChange
 }) => {
   const t = TRANSLATIONS[lang];
   const [activeSection, setActiveSection] = useState<
-    'analytics' | 'users' | 'providers' | 'ads' | 'village_settings'
+    'analytics' | 'orders' | 'settlement' | 'users' | 'providers' | 'ads' | 'village_settings'
   >('analytics');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [commissionRateInput, setCommissionRateInput] = useState<string>(
+    String(adPricing.commissionRatePercent ?? 10)
+  );
+  const [settlementMsg, setSettlementMsg] = useState<string>('');
 
   // Ad pricing state
   const [weekPrice, setWeekPrice] = useState(String(adPricing.adPriceWeekEgp));
@@ -127,7 +158,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   useEffect(() => {
     setWeekPrice(String(adPricing.adPriceWeekEgp));
     setMonthPrice(String(adPricing.adPriceMonthEgp));
-  }, [adPricing.adPriceWeekEgp, adPricing.adPriceMonthEgp, isOpen]);
+    setCommissionRateInput(String(adPricing.commissionRatePercent ?? 10));
+  }, [adPricing.adPriceWeekEgp, adPricing.adPriceMonthEgp, adPricing.commissionRatePercent, isOpen]);
 
   useEffect(() => {
     setEditBaseFee(String(activeVillage.baseDeliveryFeeEgp ?? 10));
@@ -192,7 +224,17 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     const bookingsVolumeEgp = bookings.reduce((sum, b) => sum + (b.totalAmountEgp || 0), 0);
     const avgOrderEgp =
       bookings.length > 0 ? Math.round(bookingsVolumeEgp / bookings.length) : 0;
-    const confirmedBookingsCount = bookings.filter((b) => b.status === 'confirmed' || b.status === 'completed').length;
+    const confirmedBookingsCount = bookings.filter(
+      (b) =>
+        b.status === 'confirmed' ||
+        b.status === 'preparing' ||
+        b.status === 'on_the_way' ||
+        b.status === 'completed'
+    ).length;
+    const paidOnlineCount = bookings.filter((b) => b.paymentStatus === 'paid').length;
+    const paidOnlineVolumeEgp = bookings
+      .filter((b) => b.paymentStatus === 'paid')
+      .reduce((sum, b) => sum + (b.totalAmountEgp || 0), 0);
 
     const deliveryBookings = bookings.filter((b) => typeof b.deliveryFeeEgp === 'number' || typeof b.distanceKm === 'number');
     const deliveryFeesTotalEgp = bookings.reduce((sum, b) => sum + (b.deliveryFeeEgp || 0), 0);
@@ -315,6 +357,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       adRevenueEgp,
       bookingsCount: bookings.length,
       confirmedBookingsCount,
+      paidOnlineCount,
+      paidOnlineVolumeEgp,
       bookingsVolumeEgp,
       avgOrderEgp,
       deliveryOrdersCount: deliveryBookings.length,
@@ -330,6 +374,130 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       maxCategoryWeight
     };
   }, [users, bookings, ads, providers, reviews, bannedPhones, serviceCounts, nowMs]);
+
+  const effectiveCommissionRate = Math.min(
+    50,
+    Math.max(0, Number(adPricing.commissionRatePercent ?? 10) || 0)
+  );
+
+  const pendingInstaPayVerifications = useMemo(
+    () =>
+      bookings.filter(
+        (b) =>
+          b.paymentMethod === 'instapay' &&
+          b.paymentStatus === 'pending_verification' &&
+          b.status !== 'cancelled'
+      ),
+    [bookings]
+  );
+
+  // Per-Provider Financial Settlement Ledger & Platform Reconciliation
+  const settlementReport = useMemo(() => {
+    const validOrders = bookings.filter(
+      (b) =>
+        b.status !== 'cancelled' &&
+        !(b.paymentMethod === 'instapay' && b.paymentStatus !== 'paid')
+    );
+    let totalGrossEgp = 0;
+    let totalInstaPayEgp = 0;
+    let totalCodEgp = 0;
+    let totalCodFeesEgp = 0;
+    let totalCommissionEgp = 0;
+    let netDueToProvidersEgp = 0;
+    let netDueFromProvidersEgp = 0;
+
+    type ProviderLedgerRow = {
+      key: string;
+      providerOwnerId?: string;
+      providerName: string;
+      ordersCount: number;
+      unsettledOrderIds: string[];
+      instaPayEgp: number;
+      codEgp: number;
+      codFeesEgp: number;
+      commissionEgp: number;
+      unsettledNetBalanceEgp: number; // + Admin pays provider, - Provider pays admin
+    };
+
+    const ledgerMap = new Map<string, ProviderLedgerRow>();
+
+    validOrders.forEach((b) => {
+      const total = b.totalAmountEgp || 0;
+      const codFee = b.codFeeEgp || 0;
+      const baseAmount =
+        typeof b.subtotalEgp === 'number' && b.subtotalEgp > 0
+          ? b.subtotalEgp
+          : Math.max(0, total - codFee);
+      const commission = Math.round((baseAmount * effectiveCommissionRate) / 100);
+      const isInstaPay = b.paymentMethod === 'instapay' || b.paymentStatus === 'paid';
+      const isSettled = b.settlementStatus === 'settled';
+
+      totalGrossEgp += total;
+      totalCodFeesEgp += codFee;
+      totalCommissionEgp += commission;
+      if (isInstaPay) {
+        totalInstaPayEgp += total;
+      } else {
+        totalCodEgp += total;
+      }
+
+      const key = b.providerOwnerId || b.providerName;
+      const existingRow = ledgerMap.get(key) || {
+        key,
+        providerOwnerId: b.providerOwnerId,
+        providerName: b.providerName,
+        ordersCount: 0,
+        unsettledOrderIds: [],
+        instaPayEgp: 0,
+        codEgp: 0,
+        codFeesEgp: 0,
+        commissionEgp: 0,
+        unsettledNetBalanceEgp: 0
+      };
+
+      existingRow.ordersCount += 1;
+      if (isInstaPay) existingRow.instaPayEgp += total;
+      else existingRow.codEgp += total;
+      existingRow.codFeesEgp += codFee;
+      existingRow.commissionEgp += commission;
+
+      if (!isSettled) {
+        existingRow.unsettledOrderIds.push(b.id);
+        if (isInstaPay) {
+          // Admin holds InstaPay funds -> owes provider (total - commission)
+          existingRow.unsettledNetBalanceEgp += Math.max(0, total - commission);
+        } else {
+          // Provider/driver collected cash -> owes platform (commission + codFee)
+          existingRow.unsettledNetBalanceEgp -= commission + codFee;
+        }
+      }
+
+      ledgerMap.set(key, existingRow);
+    });
+
+    const providerRows = Array.from(ledgerMap.values()).sort(
+      (a, b) => Math.abs(b.unsettledNetBalanceEgp) - Math.abs(a.unsettledNetBalanceEgp)
+    );
+
+    providerRows.forEach((row) => {
+      if (row.unsettledNetBalanceEgp > 0) netDueToProvidersEgp += row.unsettledNetBalanceEgp;
+      else if (row.unsettledNetBalanceEgp < 0)
+        netDueFromProvidersEgp += Math.abs(row.unsettledNetBalanceEgp);
+    });
+
+    return {
+      totalOrdersCount: validOrders.length,
+      totalGrossEgp,
+      totalInstaPayEgp,
+      totalCodEgp,
+      totalCodFeesEgp,
+      totalCommissionEgp,
+      platformTotalRevenueEgp: totalCommissionEgp + totalCodFeesEgp + analyticsStats.adRevenueEgp,
+      netDueToProvidersEgp,
+      netDueFromProvidersEgp,
+      providerRows
+    };
+  }, [bookings, effectiveCommissionRate, analyticsStats.adRevenueEgp]);
 
   if (!isOpen) return null;
 
@@ -358,6 +526,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           activeVillageId: 'noqbas',
           adPriceWeekEgp: w,
           adPriceMonthEgp: m,
+          commissionRatePercent: effectiveCommissionRate,
           updatedAt: serverTimestamp()
         });
       } catch (err) {
@@ -365,6 +534,34 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       }
       setPricingMsg(lang === 'ar' ? 'تم تحديث تسعيرة الإعلانات بنجاح ✓' : 'Ad pricing updated ✓');
       setTimeout(() => setPricingMsg(''), 2500);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSaveCommissionRate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const rate = Math.min(50, Math.max(0, Number(commissionRateInput) || 0));
+    setBusyId('commission-rate');
+    try {
+      onCommissionRateChange?.(rate);
+      try {
+        await setDoc(doc(db, 'appConfig', 'settings'), {
+          activeVillageId: 'noqbas',
+          adPriceWeekEgp: adPricing.adPriceWeekEgp,
+          adPriceMonthEgp: adPricing.adPriceMonthEgp,
+          commissionRatePercent: rate,
+          updatedAt: serverTimestamp()
+        });
+      } catch {
+        // Ignore if admin is testing offline/local
+      }
+      setSettlementMsg(
+        lang === 'ar'
+          ? `تم تحديث نسبة عمولة المنصة إلى ${rate}% ✓`
+          : `Platform commission updated to ${rate}% ✓`
+      );
+      setTimeout(() => setSettlementMsg(''), 2500);
     } finally {
       setBusyId(null);
     }
@@ -734,6 +931,37 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveSection('orders')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors ${
+              activeSection === 'orders'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <PackageCheck className="w-4 h-4" />
+            <span>
+              {lang === 'ar' ? `الطلبات والتنسيق (${bookings.length})` : `Orders & Dispatch (${bookings.length})`}
+            </span>
+            {pendingInstaPayVerifications.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-mono font-extrabold">
+                {pendingInstaPayVerifications.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveSection('settlement')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors ${
+              activeSection === 'settlement'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Wallet className="w-4 h-4" />
+            <span>{t.financialSettlement}</span>
+          </button>
+
+          <button
             onClick={() => setActiveSection('users')}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors ${
               activeSection === 'users'
@@ -1066,10 +1294,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                         <tr>
                           <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'العميل' : 'Customer'}</th>
                           <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'الخدمة / الطلب' : 'Service / Order'}</th>
-                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'مقدم الخدمة' : 'Provider'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'الدفع' : 'Payment'}</th>
                           <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'التاريخ' : 'Date'}</th>
                           <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'القيمة' : 'Amount'}</th>
-                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'الحالة' : 'Status'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'تحديث الحالة' : 'Order Status'}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1078,43 +1306,568 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                             <td className="px-4 py-2.5 font-bold text-slate-900 dark:text-white">
                               {b.customerName}
                             </td>
-                            <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300 max-w-[200px] truncate">
+                            <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300 max-w-[180px] truncate">
                               {b.title}
                             </td>
-                            <td className="px-4 py-2.5 text-slate-500">{b.providerName}</td>
+                            <td className="px-4 py-2.5">
+                              <span
+                                className={`font-bold ${
+                                  b.paymentStatus === 'paid' ? 'text-emerald-600' : 'text-amber-600'
+                                }`}
+                              >
+                                {getPaymentMethodLabel(b.paymentMethod, lang)}
+                              </span>
+                            </td>
                             <td className="px-4 py-2.5 font-mono text-slate-500">{b.date}</td>
                             <td className="px-4 py-2.5 font-mono font-bold text-emerald-600">
                               {b.totalAmountEgp ? `${b.totalAmountEgp} ${t.currency}` : '—'}
                             </td>
                             <td className="px-4 py-2.5">
-                              <span
-                                className={`font-bold ${
-                                  b.status === 'confirmed' || b.status === 'completed'
-                                    ? 'text-emerald-600'
-                                    : b.status === 'cancelled'
-                                    ? 'text-rose-600'
-                                    : 'text-amber-600'
-                                }`}
-                              >
-                                {b.status === 'confirmed'
-                                  ? lang === 'ar'
-                                    ? 'مؤكد'
-                                    : 'Confirmed'
-                                  : b.status === 'completed'
-                                  ? lang === 'ar'
-                                    ? 'مكتمل'
-                                    : 'Completed'
-                                  : b.status === 'cancelled'
-                                  ? lang === 'ar'
-                                    ? 'ملغي'
-                                    : 'Cancelled'
-                                  : lang === 'ar'
-                                  ? 'قيد الانتظار'
-                                  : 'Pending'}
-                              </span>
+                              {onUpdateOrderStatus ? (
+                                <select
+                                  value={b.status}
+                                  onChange={(e) =>
+                                    onUpdateOrderStatus(b.id, e.target.value as BookingStatus)
+                                  }
+                                  className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-[11px] font-bold cursor-pointer"
+                                >
+                                  {getAllowedStatusesForService(b.serviceType).map((st) => (
+                                    <option key={st} value={st}>
+                                      {getServiceStatusLabel(st, b.serviceType, lang)}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className="font-bold text-slate-700 dark:text-slate-200">
+                                  {getServiceStatusLabel(b.status, b.serviceType, lang)}
+                                </span>
+                              )}
                             </td>
                           </tr>
                         ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 0.5: FULL ORDERS & STATUS MANAGEMENT */}
+          {activeSection === 'orders' && (
+            <div className="space-y-4">
+              {/* InstaPay Payment Verification Queue */}
+              {pendingInstaPayVerifications.length > 0 && (
+                <div className="p-4 sm:p-5 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-extrabold text-sm">
+                      <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>
+                        {lang === 'ar'
+                          ? `طلبات دفع InstaPay بانتظار المراجعة والاعتماد (${pendingInstaPayVerifications.length})`
+                          : `InstaPay Transfers Pending Verification (${pendingInstaPayVerifications.length})`}
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                      {lang === 'ar'
+                        ? 'لا تظهر هذه الطلبات لمقدم الخدمة حتى تتأكد من وصول التحويل وتعتمدها'
+                        : 'Hidden from providers until you confirm receipt and approve'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {pendingInstaPayVerifications.map((b) => (
+                      <div
+                        key={`verify-${b.id}`}
+                        className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-sm">
+                              {b.title}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-mono text-[11px] font-bold">
+                              #{b.transactionRef || b.id}
+                            </span>
+                            <span className="font-mono font-extrabold text-emerald-600 text-xs">
+                              {b.totalAmountEgp ? `${b.totalAmountEgp} ${t.currency}` : b.totalAmount}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                            <span className="font-bold">{b.customerName}</span> ·{' '}
+                            <span className="font-mono">{b.customerPhone}</span> ·{' '}
+                            <span className="text-slate-500">{lang === 'ar' ? 'مقدم الخدمة:' : 'Provider:'}</span>{' '}
+                            <span className="font-bold">{b.providerName}</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-700 dark:text-slate-300 pt-0.5">
+                            <span>
+                              {lang === 'ar' ? 'حساب/هاتف المرسل:' : 'Sender:'}{' '}
+                              <strong className="font-mono text-slate-900 dark:text-white">
+                                {b.instaPaySender || (lang === 'ar' ? 'غير مسجل' : 'N/A')}
+                              </strong>
+                            </span>
+                            {b.instaPayCustomerRef && (
+                              <span>
+                                {lang === 'ar' ? 'مرجع التحويل البنكي:' : 'Bank Ref:'}{' '}
+                                <strong className="font-mono text-slate-900 dark:text-white">
+                                  {b.instaPayCustomerRef}
+                                </strong>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => onVerifyInstaPayPayment?.(b.id, 'approve')}
+                            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>
+                              {lang === 'ar'
+                                ? 'اعتماد الدفع وإرسال لمقدم الخدمة'
+                                : 'Approve & Release to Provider'}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onVerifyInstaPayPayment?.(b.id, 'reject')}
+                            className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>
+                              {lang === 'ar'
+                                ? 'رفض التحويل وإلغاء الطلب'
+                                : 'Reject & Cancel'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(
+                    ['all', 'pending', 'confirmed', 'preparing', 'on_the_way', 'completed', 'cancelled'] as const
+                  ).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setOrderStatusFilter(st)}
+                      className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-colors ${
+                        orderStatusFilter === st
+                          ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {st === 'all'
+                        ? lang === 'ar'
+                          ? `الكل (${bookings.length})`
+                          : `All (${bookings.length})`
+                        : getStatusLabel(st, lang)}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+                  <CreditCard className="w-4 h-4" />
+                  <span>
+                    {lang === 'ar'
+                      ? `مدفوع إلكترونياً ومعتمد: ${analyticsStats.paidOnlineCount} (${analyticsStats.paidOnlineVolumeEgp.toLocaleString()} ج.م)`
+                      : `Verified Online Paid: ${analyticsStats.paidOnlineCount} (${analyticsStats.paidOnlineVolumeEgp.toLocaleString()} EGP)`}
+                  </span>
+                </div>
+              </div>
+
+              {bookings.filter((b) => orderStatusFilter === 'all' || b.status === orderStatusFilter).length === 0 ? (
+                <div className="py-12 text-center text-slate-400">
+                  {lang === 'ar' ? 'لا توجد طلبات بهذه الحالة.' : 'No orders match this status.'}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {bookings
+                    .filter((b) => orderStatusFilter === 'all' || b.status === orderStatusFilter)
+                    .map((b) => {
+                      const isAwaitingInstaPay =
+                        b.paymentMethod === 'instapay' && b.paymentStatus === 'pending_verification';
+                      const isRejectedPayment = b.paymentStatus === 'rejected';
+                      return (
+                        <div
+                          key={b.id}
+                          className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                        >
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-extrabold text-slate-900 dark:text-white">
+                                {b.title}
+                              </span>
+                              {b.transactionRef && (
+                                <span className="font-mono text-[11px] text-slate-400">
+                                  #{b.transactionRef}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                              <span className="font-bold">{b.customerName}</span> ·{' '}
+                              <span className="font-mono">{b.customerPhone}</span> · {b.providerName}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {b.address} · <span className="font-mono">{b.date}</span>
+                              {b.itemsSummary ? ` · ${b.itemsSummary}` : ''}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <span
+                                className={`px-2 py-0.5 rounded-lg font-bold ${
+                                  b.paymentStatus === 'paid'
+                                    ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                                    : isRejectedPayment
+                                    ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                                    : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                                }`}
+                              >
+                                {getPaymentMethodLabel(b.paymentMethod, lang)}{' '}
+                                {b.paymentStatus === 'paid'
+                                  ? '✓'
+                                  : isAwaitingInstaPay
+                                  ? lang === 'ar'
+                                    ? '(قيد مراجعة الإدارة)'
+                                    : '(Awaiting Admin)'
+                                  : isRejectedPayment
+                                  ? lang === 'ar'
+                                    ? '(مرفوض)'
+                                    : '(Rejected)'
+                                  : ''}
+                              </span>
+                              {b.totalAmountEgp ? (
+                                <span className="font-mono font-extrabold text-emerald-600">
+                                  {b.totalAmountEgp} {t.currency}
+                                </span>
+                              ) : null}
+                              {b.instaPaySender && (
+                                <span className="text-[11px] text-slate-500">
+                                  {lang === 'ar' ? 'مرسل:' : 'Sender:'}{' '}
+                                  <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                                    {b.instaPaySender}
+                                  </span>
+                                </span>
+                              )}
+                              {b.instaPayCustomerRef && (
+                                <span className="text-[11px] text-slate-500">
+                                  {lang === 'ar' ? 'مرجع:' : 'Ref:'}{' '}
+                                  <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                                    {b.instaPayCustomerRef}
+                                  </span>
+                                </span>
+                              )}
+                              {b.deliveryConfirmedRef && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-bold text-[11px]">
+                                  <KeyRound className="w-3 h-3" />
+                                  <span>
+                                    {lang === 'ar' ? 'تأكيد التسليم:' : 'Delivery Ref:'}{' '}
+                                    <span className="font-mono">{b.deliveryConfirmedRef}</span>
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:items-end gap-2 shrink-0">
+                            {isAwaitingInstaPay && onVerifyInstaPayPayment && (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => onVerifyInstaPayPayment(b.id, 'approve')}
+                                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{lang === 'ar' ? 'اعتماد التحويل' : 'Approve'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onVerifyInstaPayPayment(b.id, 'reject')}
+                                  className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>{lang === 'ar' ? 'رفض' : 'Reject'}</span>
+                                </button>
+                              </div>
+                            )}
+
+                            {onAssignOrderProvider && providers.length > 0 && (
+                              <div className="flex items-center gap-1.5">
+                                <UserPlus className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                <select
+                                  value={b.providerOwnerId || ''}
+                                  onChange={(e) => {
+                                    const selectedUid = e.target.value;
+                                    const found = providers.find((p) => p.ownerId === selectedUid);
+                                    if (found) {
+                                      onAssignOrderProvider(
+                                        b.id,
+                                        found.ownerId,
+                                        lang === 'ar' ? found.nameAr : found.nameEn
+                                      );
+                                    }
+                                  }}
+                                  aria-label={lang === 'ar' ? 'توجيه لمقدم خدمة' : 'Assign Provider'}
+                                  className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-[11px] font-semibold cursor-pointer"
+                                >
+                                  <option value="">
+                                    {lang === 'ar'
+                                      ? `توجيه لمقدم خدمة (${b.providerName})`
+                                      : `Route to provider (${b.providerName})`}
+                                  </option>
+                                  {providers.map((p) => (
+                                    <option key={p.id} value={p.ownerId}>
+                                      {lang === 'ar' ? p.nameAr : p.nameEn} ({lang === 'ar' ? p.specialtyAr : p.specialtyEn})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                              <label className="text-[11px] font-bold text-slate-500">
+                                {lang === 'ar' ? 'الحالة:' : 'Status:'}
+                              </label>
+                              <select
+                                value={b.status}
+                                onChange={(e) =>
+                                  onUpdateOrderStatus?.(b.id, e.target.value as BookingStatus)
+                                }
+                                className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold cursor-pointer"
+                              >
+                                {getAllowedStatusesForService(b.serviceType).map((st) => (
+                                  <option key={st} value={st}>
+                                    {getServiceStatusLabel(st, b.serviceType, lang)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 0.75: FINANCIAL SETTLEMENT & PLATFORM COORDINATION */}
+          {activeSection === 'settlement' && (
+            <div className="space-y-6">
+              {/* Commission Settings Card */}
+              <form
+                onSubmit={handleSaveCommissionRate}
+                className="p-4 sm:p-5 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 flex flex-col sm:flex-row sm:items-end justify-between gap-4"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 font-bold text-sm text-slate-900 dark:text-white">
+                    <Wallet className="w-4 h-4 text-amber-600" />
+                    <span>
+                      {lang === 'ar'
+                        ? 'إعداد عمولة المنصة وآلية التسوية المالية'
+                        : 'Platform Commission & Financial Settlement Rules'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'طلبات InstaPay تُحصّل لحساب المنصة (01012405014) ويُحوَّل صافيها للمقدم بعد خصم العمولة. طلبات الكاش (COD) يُحصّلها المقدم/المندوب وتُخصم العمولة + 10 ج.م تحصيل عند التسوية.'
+                      : 'InstaPay orders are collected by the platform (01012405014) and settled net of commission. COD orders are collected by provider/courier with commission + 10 EGP COD fee reconciled.'}
+                  </p>
+                  {settlementMsg && (
+                    <div className="text-emerald-700 dark:text-emerald-400 font-bold pt-1">
+                      {settlementMsg}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-end gap-2 shrink-0">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {lang === 'ar' ? 'نسبة عمولة المنصة (%)' : 'Commission (%)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      value={commissionRateInput}
+                      onChange={(e) => setCommissionRateInput(e.target.value)}
+                      className="w-24 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={busyId === 'commission-rate'}
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+                  >
+                    {lang === 'ar' ? 'حفظ النسبة' : 'Save Rate'}
+                  </button>
+                </div>
+              </form>
+
+              {/* 4 Financial Reconciliation KPI Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/25 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                    <span>{lang === 'ar' ? 'تحصيلات InstaPay (01012405014)' : 'InstaPay Collected'}</span>
+                    <Landmark className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div className="text-2xl font-black font-mono text-emerald-700 dark:text-emerald-300">
+                    {settlementReport.totalInstaPayEgp.toLocaleString()} {t.currency}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {lang === 'ar' ? 'محوّلة مباشرة لحساب الإدارة' : 'Received directly by platform'}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/25 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                    <span>{lang === 'ar' ? 'تحصيلات كاش عند الاستلام (COD)' : 'Cash on Delivery (COD)'}</span>
+                    <Banknote className="w-4 h-4 text-amber-600" />
+                  </div>
+                  <div className="text-2xl font-black font-mono text-amber-700 dark:text-amber-300">
+                    {settlementReport.totalCodEgp.toLocaleString()} {t.currency}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {lang === 'ar'
+                      ? `تشمل ${settlementReport.totalCodFeesEgp} ج.م رسوم تحصيل`
+                      : `Includes ${settlementReport.totalCodFeesEgp} EGP COD fees`}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/50 dark:bg-sky-950/25 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-sky-800 dark:text-sky-300">
+                    <span>{lang === 'ar' ? 'إجمالي أرباح المنصة الصافية' : 'Net Platform Earnings'}</span>
+                    <TrendingUp className="w-4 h-4 text-sky-600" />
+                  </div>
+                  <div className="text-2xl font-black font-mono text-sky-700 dark:text-sky-300">
+                    {settlementReport.platformTotalRevenueEgp.toLocaleString()} {t.currency}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {lang === 'ar'
+                      ? `${settlementReport.totalCommissionEgp} عمولة + ${settlementReport.totalCodFeesEgp} تحصيل + ${analyticsStats.adRevenueEgp} إعلانات`
+                      : `${settlementReport.totalCommissionEgp} comm + ${settlementReport.totalCodFeesEgp} COD + ${analyticsStats.adRevenueEgp} ads`}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    <span>{lang === 'ar' ? 'صافي التسويات المفتوحة' : 'Open Settlements'}</span>
+                    <Wallet className="w-4 h-4 text-slate-500" />
+                  </div>
+                  <div className="text-lg font-black font-mono text-emerald-600">
+                    +{settlementReport.netDueToProvidersEgp.toLocaleString()} {t.currency}{' '}
+                    <span className="text-[10px] font-normal text-slate-500">
+                      {lang === 'ar' ? 'للمقدمين' : 'to providers'}
+                    </span>
+                  </div>
+                  <div className="text-xs font-bold font-mono text-amber-600">
+                    -{settlementReport.netDueFromProvidersEgp.toLocaleString()} {t.currency}{' '}
+                    <span className="text-[10px] font-normal text-slate-500">
+                      {lang === 'ar' ? 'تحصيل من المقدمين' : 'from providers'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-Provider Settlement Ledger Table */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+                <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <span className="font-bold text-sm text-slate-900 dark:text-white">
+                    {lang === 'ar'
+                      ? 'كشف حساب وتسوية مقدمي الخدمات (قرية نقباس)'
+                      : 'Provider Financial Settlement Ledger'}
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    {settlementReport.providerRows.length} {lang === 'ar' ? 'مقدم / جهة' : 'providers'}
+                  </span>
+                </div>
+
+                {settlementReport.providerRows.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400">
+                    {lang === 'ar' ? 'لا توجد حركات مالية بعد.' : 'No financial transactions yet.'}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-start text-xs">
+                      <thead className="bg-slate-50/70 dark:bg-slate-900/50 text-slate-500 border-b border-slate-100 dark:border-slate-800">
+                        <tr>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'مقدم الخدمة' : 'Provider'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'الطلبات' : 'Orders'}</th>
+                          <th className="px-4 py-2.5 text-start">InstaPay</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'كاش COD' : 'COD'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? `عمولة (${effectiveCommissionRate}%) + تحصيل` : 'Platform Cut'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'صافي التسوية المفتوحة' : 'Open Net Balance'}</th>
+                          <th className="px-4 py-2.5 text-start">{lang === 'ar' ? 'إجراء' : 'Action'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {settlementReport.providerRows.map((row) => {
+                          const hasUnsettled = row.unsettledOrderIds.length > 0;
+                          return (
+                            <tr key={row.key} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                              <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">
+                                {row.providerName}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">
+                                {row.ordersCount}
+                                {hasUnsettled && (
+                                  <span className="ms-1 text-[10px] text-amber-600 font-bold">
+                                    ({row.unsettledOrderIds.length} {lang === 'ar' ? 'مفتوح' : 'open'})
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 font-mono font-bold text-emerald-600">
+                                {row.instaPayEgp} {t.currency}
+                              </td>
+                              <td className="px-4 py-3 font-mono font-bold text-amber-600">
+                                {row.codEgp} {t.currency}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300">
+                                {row.commissionEgp + row.codFeesEgp} {t.currency}
+                              </td>
+                              <td className="px-4 py-3 font-mono font-extrabold">
+                                {!hasUnsettled ? (
+                                  <span className="text-emerald-600">
+                                    {lang === 'ar' ? 'تمت التسوية ✓' : 'Settled ✓'}
+                                  </span>
+                                ) : row.unsettledNetBalanceEgp >= 0 ? (
+                                  <span className="text-emerald-600">
+                                    +{row.unsettledNetBalanceEgp} {t.currency}{' '}
+                                    <span className="text-[10px] font-normal">
+                                      ({lang === 'ar' ? 'يُحوّل للمقدم' : 'pay provider'})
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span className="text-rose-600">
+                                    {row.unsettledNetBalanceEgp} {t.currency}{' '}
+                                    <span className="text-[10px] font-normal">
+                                      ({lang === 'ar' ? 'يُحصّل من المقدم' : 'collect from provider'})
+                                    </span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {hasUnsettled ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onSettleOrders?.(row.unsettledOrderIds)}
+                                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] whitespace-nowrap cursor-pointer"
+                                  >
+                                    {lang === 'ar' ? 'تصفية وتسوية الكل' : 'Mark Settled'}
+                                  </button>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

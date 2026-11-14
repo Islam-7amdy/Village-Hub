@@ -175,25 +175,44 @@ service cloud.firestore {
     function isValidBooking(data) {
       return data.keys().hasAll(['ownerId', 'villageId', 'serviceType', 'title', 'providerName', 'customerName', 'customerPhone', 'status', 'createdAt']) &&
         data.keys().hasOnly([
-          'ownerId', 'villageId', 'serviceType', 'title', 'providerName', 'customerName',
-          'customerPhone', 'address', 'distanceKm', 'deliveryFeeEgp', 'totalAmountEgp',
-          'date', 'time', 'notes', 'status', 'createdAt'
+          'ownerId', 'villageId', 'serviceType', 'title', 'providerOwnerId', 'providerName', 'customerName',
+          'customerPhone', 'address', 'distanceKm', 'deliveryFeeEgp', 'codFeeEgp', 'subtotalEgp',
+          'totalAmountEgp', 'date', 'time', 'notes', 'itemsSummary',
+          'paymentMethod', 'paymentStatus', 'providerVisible', 'instaPaySender', 'instaPayCustomerRef',
+          'paymentVerifiedAt', 'transactionRef', 'deliveryConfirmedRef', 'deliveryConfirmedAt',
+          'settlementStatus', 'settledAt', 'adminNotes', 'status', 'createdAt'
         ]) &&
         isValidId(data.ownerId) &&
         isValidId(data.villageId) &&
         data.serviceType in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'other', 'farm', 'ride'] &&
         data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        (!('providerOwnerId' in data) || isValidId(data.providerOwnerId)) &&
         data.providerName is string && data.providerName.size() >= 1 && data.providerName.size() <= 100 &&
         data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 80 &&
         data.customerPhone is string && data.customerPhone.size() >= 3 && data.customerPhone.size() <= 30 &&
         (!('address' in data) || (data.address is string && data.address.size() <= 160)) &&
         (!('distanceKm' in data) || (data.distanceKm is number && data.distanceKm >= 0 && data.distanceKm <= 200)) &&
         (!('deliveryFeeEgp' in data) || (data.deliveryFeeEgp is number && data.deliveryFeeEgp >= 0 && data.deliveryFeeEgp <= 5000)) &&
+        (!('codFeeEgp' in data) || (data.codFeeEgp is number && data.codFeeEgp >= 0 && data.codFeeEgp <= 500)) &&
+        (!('subtotalEgp' in data) || (data.subtotalEgp is number && data.subtotalEgp >= 0 && data.subtotalEgp <= 100000)) &&
         (!('totalAmountEgp' in data) || (data.totalAmountEgp is number && data.totalAmountEgp >= 0 && data.totalAmountEgp <= 100000)) &&
         (!('date' in data) || (data.date is string && data.date.size() <= 40)) &&
         (!('time' in data) || (data.time is string && data.time.size() <= 40)) &&
         (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
-        data.status in ['pending', 'confirmed', 'completed', 'cancelled'] &&
+        (!('itemsSummary' in data) || (data.itemsSummary is string && data.itemsSummary.size() <= 400)) &&
+        (!('paymentMethod' in data) || (data.paymentMethod in ['card', 'vodafone_cash', 'instapay', 'cod'])) &&
+        (!('paymentStatus' in data) || (data.paymentStatus in ['paid', 'pending_verification', 'pending_cod', 'rejected'])) &&
+        (!('providerVisible' in data) || (data.providerVisible is bool)) &&
+        (!('instaPaySender' in data) || (data.instaPaySender is string && data.instaPaySender.size() <= 60)) &&
+        (!('instaPayCustomerRef' in data) || (data.instaPayCustomerRef is string && data.instaPayCustomerRef.size() <= 60)) &&
+        (!('paymentVerifiedAt' in data) || (data.paymentVerifiedAt is string && data.paymentVerifiedAt.size() <= 40)) &&
+        (!('transactionRef' in data) || (data.transactionRef is string && data.transactionRef.size() <= 60)) &&
+        (!('deliveryConfirmedRef' in data) || (data.deliveryConfirmedRef is string && data.deliveryConfirmedRef.size() <= 60)) &&
+        (!('deliveryConfirmedAt' in data) || (data.deliveryConfirmedAt is string && data.deliveryConfirmedAt.size() <= 40)) &&
+        (!('settlementStatus' in data) || (data.settlementStatus in ['pending', 'settled'])) &&
+        (!('settledAt' in data) || (data.settledAt is string && data.settledAt.size() <= 40)) &&
+        (!('adminNotes' in data) || (data.adminNotes is string && data.adminNotes.size() <= 300)) &&
+        data.status in ['pending', 'preparing', 'on_the_way', 'confirmed', 'completed', 'cancelled'] &&
         data.createdAt is timestamp;
     }
 
@@ -217,10 +236,11 @@ service cloud.firestore {
 
     function isValidAppSettings(data) {
       return data.keys().hasAll(['activeVillageId', 'updatedAt']) &&
-        data.keys().hasOnly(['activeVillageId', 'adPriceWeekEgp', 'adPriceMonthEgp', 'updatedAt']) &&
+        data.keys().hasOnly(['activeVillageId', 'adPriceWeekEgp', 'adPriceMonthEgp', 'commissionRatePercent', 'updatedAt']) &&
         isValidId(data.activeVillageId) &&
         (!('adPriceWeekEgp' in data) || (data.adPriceWeekEgp is number && data.adPriceWeekEgp >= 0 && data.adPriceWeekEgp <= 10000)) &&
         (!('adPriceMonthEgp' in data) || (data.adPriceMonthEgp is number && data.adPriceMonthEgp >= 0 && data.adPriceMonthEgp <= 50000)) &&
+        (!('commissionRatePercent' in data) || (data.commissionRatePercent is number && data.commissionRatePercent >= 0 && data.commissionRatePercent <= 50)) &&
         data.updatedAt is timestamp;
     }
 
@@ -392,24 +412,61 @@ service cloud.firestore {
 
     // Bookings & Orders
     match /bookings/{bookingId} {
-      allow get: if isValidId(bookingId) && (isOwner(existing().ownerId) || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow get: if isValidId(bookingId) && (
+        isOwner(existing().ownerId) ||
+        (isOwner(existing().get('providerOwnerId', '')) && existing().get('providerVisible', true) == true) ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        (resource.data.get('providerOwnerId', '') == request.auth.uid && resource.data.get('providerVisible', true) == true) ||
+        isAdmin()
+      );
       allow create: if isValidId(bookingId) &&
         isSignedIn() &&
         isVerifiedUser() &&
         isNotBannedUser() &&
         isValidBooking(incoming()) &&
         incoming().ownerId == request.auth.uid &&
-        incoming().createdAt == request.time;
+        incoming().createdAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            incoming().status == 'pending' &&
+            (
+              (incoming().get('paymentMethod', 'cod') == 'instapay' && incoming().get('paymentStatus', '') == 'pending_verification' && incoming().get('providerVisible', false) == false) ||
+              (incoming().get('paymentMethod', 'cod') != 'instapay' && incoming().get('providerVisible', true) == true)
+            )
+          )
+        );
       allow update: if isValidId(bookingId) &&
         isVerifiedUser() &&
         isValidBooking(incoming()) &&
         incoming().ownerId == existing().ownerId &&
         incoming().createdAt == existing().createdAt &&
-        existing().status in ['pending', 'confirmed'] &&
         (
           isAdmin() ||
-          (isOwner(existing().ownerId) && isNotBannedUser() && incoming().diff(existing()).affectedKeys().hasOnly(['status']) && incoming().status == 'cancelled')
+          (
+            existing().status in ['pending', 'preparing', 'on_the_way', 'confirmed'] &&
+            isNotBannedUser() &&
+            (
+              (
+                isOwner(existing().ownerId) &&
+                incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+                incoming().status == 'cancelled'
+              ) ||
+              (
+                isOwner(existing().get('providerOwnerId', '')) &&
+                existing().get('providerVisible', true) == true &&
+                incoming().diff(existing()).affectedKeys().hasOnly(['status', 'deliveryConfirmedRef', 'deliveryConfirmedAt']) &&
+                incoming().status in ['confirmed', 'preparing', 'on_the_way', 'completed', 'cancelled'] &&
+                (
+                  !(existing().serviceType in ['food', 'pharmacy', 'grocery', 'farm'] && incoming().status == 'completed') ||
+                  ('deliveryConfirmedRef' in incoming() && incoming().deliveryConfirmedRef is string && incoming().deliveryConfirmedRef.size() >= 4)
+                )
+              )
+            )
+          )
         );
       allow delete: if isAdmin() && isValidId(bookingId);
     }

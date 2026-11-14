@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Language, VillageConfig, calculateDeliveryFeeEgp } from '../../data/villageData';
+import {
+  Language,
+  PendingPaymentOrder,
+  VillageConfig,
+  calculateDeliveryFeeEgp
+} from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
-import { X, Camera, CheckCircle2, Truck, MapPin } from 'lucide-react';
+import { X, Camera, Truck, MapPin, CreditCard } from 'lucide-react';
 
 interface PrescriptionUploadModalProps {
   isOpen: boolean;
@@ -11,14 +16,7 @@ interface PrescriptionUploadModalProps {
   defaultName?: string;
   defaultPhone?: string;
   defaultAddress?: string;
-  onPrescriptionSent: (orderInfo: {
-    name: string;
-    phone: string;
-    address: string;
-    notes: string;
-    distanceKm: number;
-    deliveryFeeEgp: number;
-  }) => void;
+  onProceedToPayment: (order: PendingPaymentOrder) => void;
 }
 
 export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = ({
@@ -29,7 +27,7 @@ export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = (
   defaultName = '',
   defaultPhone = '',
   defaultAddress = '',
-  onPrescriptionSent
+  onProceedToPayment
 }) => {
   const t = TRANSLATIONS[lang];
   const [patientName, setPatientName] = useState(defaultName);
@@ -40,7 +38,6 @@ export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = (
   const [address, setAddress] = useState(defaultAddress);
   const [notes, setNotes] = useState('');
   const [hasPhoto, setHasPhoto] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
 
   useEffect(() => {
     if (defaultName && !patientName) setPatientName(defaultName);
@@ -69,20 +66,33 @@ export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = (
     e.preventDefault();
     if (!patientName.trim() || !phone.trim()) return;
 
-    onPrescriptionSent({
-      name: patientName,
-      phone,
-      address: `${district ? district.name[lang] : ''}${address.trim() ? ` - ${address.trim()}` : ''}`,
-      notes,
-      distanceKm,
-      deliveryFeeEgp
-    });
+    const fullAddress = `${district ? district.name[lang] : ''}${address.trim() ? ` - ${address.trim()}` : ''}`;
 
-    setIsSuccess(true);
-    setTimeout(() => {
-      setIsSuccess(false);
-      onClose();
-    }, 1800);
+    const pendingOrder: PendingPaymentOrder = {
+      source: 'prescription',
+      serviceType: 'pharmacy',
+      title: lang === 'ar' ? 'صرف وتوصيل روشتة طبية' : 'Prescription Fulfillment & Delivery',
+      providerName: lang === 'ar' ? `صيدلية الشفاء - ${activeVillage.nameAr}` : `Al-Shifa Pharmacy - ${activeVillage.nameEn}`,
+      customerName: patientName.trim(),
+      customerPhone: phone.trim(),
+      address: fullAddress,
+      distanceKm,
+      deliveryFeeEgp,
+      subtotalEgp: 0,
+      totalAmountEgp: deliveryFeeEgp,
+      date: new Date().toISOString().split('T')[0],
+      notes: notes.trim() || undefined,
+      itemsSummary: hasPhoto
+        ? lang === 'ar'
+          ? 'صورة روشتة مرفقة — سداد رسوم التوصيل الآن وحساب الأدوية عند التجهيز'
+          : 'Prescription photo attached — Delivery fee checkout'
+        : lang === 'ar'
+        ? 'طلب صرف روشتة طبية'
+        : 'Prescription order'
+    };
+
+    onClose();
+    onProceedToPayment(pendingOrder);
   };
 
   return (
@@ -111,22 +121,7 @@ export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = (
           </button>
         </div>
 
-        {isSuccess ? (
-          <div className="p-10 text-center space-y-3">
-            <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-7 h-7" />
-            </div>
-            <h4 className="text-lg font-bold text-slate-900 dark:text-white">
-              {lang === 'ar' ? 'تمام! الروشتة وصلت الصيدلية' : 'Prescription Photo Received!'}
-            </h4>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {lang === 'ar'
-                ? 'د. هدى بتجهزلك العلاج دلوقتي والمندوب هيوصلهولك لحد البيت والدفع كاش عند الاستلام.'
-                : 'The pharmacist is preparing your medication for doorstep cash-on-delivery.'}
-            </p>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto text-xs">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto text-xs">
             {/* Photo Attachment */}
             <div
               onClick={() => setHasPhoto(!hasPhoto)}
@@ -253,13 +248,13 @@ export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = (
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                {lang === 'ar' ? 'ابعت للصيدلية دلوقتي' : 'Send to Pharmacy'}
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>{t.proceedToPayment} ({deliveryFeeEgp} {t.currency})</span>
               </button>
             </div>
           </form>
-        )}
       </div>
     </div>
   );

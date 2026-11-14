@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   Language,
+  PendingPaymentOrder,
   VillageConfig,
   calculateDeliveryFeeEgp
 } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
-import { X, ShoppingBag, Plus, Minus, Trash2, CheckCircle2, Truck, MapPin, Store } from 'lucide-react';
+import { X, ShoppingBag, Plus, Minus, Trash2, Truck, MapPin, Store, CreditCard } from 'lucide-react';
 
 export interface CartItem {
   id: string;
@@ -13,6 +14,8 @@ export interface CartItem {
   price: number;
   quantity: number;
   type: 'food' | 'pharmacy' | 'grocery' | 'farm';
+  providerName?: string;
+  providerOwnerId?: string;
 }
 
 interface CartModalProps {
@@ -26,16 +29,7 @@ interface CartModalProps {
   defaultAddress?: string;
   onUpdateQuantity: (id: string, delta: number) => void;
   onRemoveItem: (id: string) => void;
-  onClearCart: () => void;
-  onCheckoutSuccess: (order: {
-    name: string;
-    phone: string;
-    address: string;
-    distanceKm: number;
-    deliveryFeeEgp: number;
-    total: number;
-    items: CartItem[];
-  }) => void;
+  onProceedToPayment: (order: PendingPaymentOrder) => void;
 }
 
 export const CartModal: React.FC<CartModalProps> = ({
@@ -49,8 +43,7 @@ export const CartModal: React.FC<CartModalProps> = ({
   defaultAddress = '',
   onUpdateQuantity,
   onRemoveItem,
-  onClearCart,
-  onCheckoutSuccess
+  onProceedToPayment
 }) => {
   const t = TRANSLATIONS[lang];
   const [customerName, setCustomerName] = useState(defaultName);
@@ -63,7 +56,6 @@ export const CartModal: React.FC<CartModalProps> = ({
   const [customDistanceKm, setCustomDistanceKm] = useState<number>(
     activeVillage.districts[0]?.distanceKm || 1.0
   );
-  const [isSuccess, setIsSuccess] = useState(false);
 
   useEffect(() => {
     if (defaultName && !customerName) setCustomerName(defaultName);
@@ -119,22 +111,36 @@ export const CartModal: React.FC<CartModalProps> = ({
         : 'Store Pickup'
       : `${selectedDist ? selectedDist.name[lang] : ''}${address.trim() ? ` - ${address.trim()}` : ''}`;
 
-    onCheckoutSuccess({
-      name: finalName,
-      phone: finalPhone,
+    const summaryText = items
+      .map((i) => `${i.name} × ${i.quantity}`)
+      .join(' · ')
+      .slice(0, 380);
+
+    const primaryProviderName =
+      items.find((i) => i.providerName)?.providerName ||
+      (lang === 'ar' ? `مطابخ ومتاجر ${activeVillage.nameAr}` : `${activeVillage.nameEn} Merchants`);
+    const primaryProviderOwnerId = items.find((i) => i.providerOwnerId)?.providerOwnerId;
+
+    const pendingOrder: PendingPaymentOrder = {
+      source: 'cart',
+      serviceType: items[0]?.type || 'food',
+      title: `${lang === 'ar' ? 'طلب مشتريات وتوصيل منزلي' : 'Village Delivery Order'} (${items.length} ${lang === 'ar' ? 'أصناف' : 'items'})`,
+      providerOwnerId: primaryProviderOwnerId,
+      providerName: primaryProviderName,
+      customerName: finalName,
+      customerPhone: finalPhone,
       address: fullAddress,
       distanceKm,
       deliveryFeeEgp,
-      total: totalAmount,
-      items
-    });
+      subtotalEgp: subtotalAmount,
+      totalAmountEgp: totalAmount,
+      date: new Date().toISOString().split('T')[0],
+      itemsSummary: summaryText,
+      cartItems: items.map((i) => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity }))
+    };
 
-    setIsSuccess(true);
-    setTimeout(() => {
-      setIsSuccess(false);
-      onClearCart();
-      onClose();
-    }, 1800);
+    onClose();
+    onProceedToPayment(pendingOrder);
   };
 
   return (
@@ -154,19 +160,7 @@ export const CartModal: React.FC<CartModalProps> = ({
           </button>
         </div>
 
-        {isSuccess ? (
-          <div className="p-10 text-center space-y-3">
-            <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-7 h-7" />
-            </div>
-            <h4 className="text-lg font-bold text-slate-900 dark:text-white">{t.orderSuccess}</h4>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {lang === 'ar'
-                ? 'طلبك بيتجهز حالاً والمندوب في طريقه ليك. الدفع كاش عند الاستلام.'
-                : 'Your order is being prepared and will arrive shortly with cash on delivery.'}
-            </p>
-          </div>
-        ) : items.length === 0 ? (
+        {items.length === 0 ? (
           <div className="p-12 text-center space-y-3">
             <ShoppingBag className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
             <div className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t.emptyCart}</div>
@@ -388,9 +382,10 @@ export const CartModal: React.FC<CartModalProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors shadow-xs cursor-pointer text-center"
+                className="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-2"
               >
-                {t.checkout} ({totalAmount.toFixed(0)} {t.currency})
+                <CreditCard className="w-4 h-4" />
+                <span>{t.proceedToPayment} ({totalAmount.toFixed(0)} {t.currency})</span>
               </button>
             </div>
           </form>
