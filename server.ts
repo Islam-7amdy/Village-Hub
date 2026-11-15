@@ -16,7 +16,13 @@ import {
   type ServiceAccount
 } from 'firebase-admin/app';
 import { getAuth, type Auth } from 'firebase-admin/auth';
-import { getFirestore as getAdminFirestore, type Firestore } from 'firebase-admin/firestore';
+import {
+  getFirestore as getAdminFirestore,
+  FieldValue,
+  type Firestore,
+  type QueryDocumentSnapshot,
+  type WriteBatch
+} from 'firebase-admin/firestore';
 
 dotenv.config();
 
@@ -174,6 +180,8 @@ if (apiKey) {
       }
     }
   });
+  // An invalid GEMINI_MODEL is otherwise invisible (failures fall back to a canned reply), so log it.
+  console.log(`Gemini assistant enabled (model: ${GEMINI_MODEL})`);
 }
 
 interface VerifiedAuthUser {
@@ -399,7 +407,7 @@ Give a concise, helpful response (2-3 short sentences) in ${isArabic ? 'Egyptian
 
       res.json({ answer: response.text || fallbackReply });
     } catch (error) {
-      console.error('Village assistant error:', error);
+      console.error(`Village assistant error (model: ${GEMINI_MODEL}):`, error);
       res.json({ answer: fallbackReply });
     }
   }
@@ -432,19 +440,18 @@ app.post('/api/auth/check-ban', banCheckLimiter, async (req: Request, res: Respo
       res.json({ configured: true, banned: false });
       return;
     }
+    // This endpoint is public (it runs before sign-in), so it never returns the ban reason.
     const ban = snap.data() as {
       isPermanent?: boolean;
       banUntilMs?: number;
-      reason?: string;
     };
     const now = Date.now();
     const active = Boolean(ban.isPermanent) || Boolean(ban.banUntilMs && now < ban.banUntilMs);
     res.json({
       configured: true,
       banned: active,
-      isPermanent: Boolean(ban.isPermanent),
-      banUntilMs: ban.banUntilMs || 0,
-      reason: active ? ban.reason || '' : ''
+      isPermanent: active && Boolean(ban.isPermanent),
+      banUntilMs: active ? ban.banUntilMs || 0 : 0
     });
   } catch (err) {
     console.warn('Pre-auth ban lookup warning:', err);
@@ -452,7 +459,48 @@ app.post('/api/auth/check-ban', banCheckLimiter, async (req: Request, res: Respo
   }
 });
 
-// Full Account Deletion via Firebase Admin SDK (deletes Auth account + Firestore user/provider/cart docs)
+const BATCH_LIMIT = 400;
+
+// Removes or anonymizes everything a deleted user left behind, so no name/phone/address survives.
+// Ads and analytics are deleted; reviews keep their rating but lose the author; orders are kept
+// (providers and admins need them for settlement) with the customer's personal fields blanked.
+async function cleanupUserData(db: Firestore, uid: string): Promise<void> {
+  const applyInChunks = async (
+    docs: QueryDocumentSnapshot[],
+    apply: (batch: WriteBatch, snap: QueryDocumentSnapshot) => void
+  ): Promise<void> => {
+    for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
+      const batch = db.batch();
+      for (const snap of docs.slice(i, i + BATCH_LIMIT)) apply(batch, snap);
+      await batch.commit();
+    }
+  };
+
+  for (const name of ['ads', 'analyticsEvents']) {
+    const snap = await db.collection(name).where('ownerId', '==', uid).get();
+    await applyInChunks(snap.docs, (batch, d) => batch.delete(d.ref));
+  }
+
+  const reviews = await db.collection('reviews').where('ownerId', '==', uid).get();
+  await applyInChunks(reviews.docs, (batch, d) =>
+    batch.update(d.ref, { author: 'deleted-user', neighborhood: FieldValue.delete() })
+  );
+
+  // Placeholder phone is 3 chars because firestore.rules requires customerPhone.size() >= 3.
+  const bookings = await db.collection('bookings').where('ownerId', '==', uid).get();
+  await applyInChunks(bookings.docs, (batch, d) =>
+    batch.update(d.ref, {
+      customerName: 'deleted-user',
+      customerPhone: '---',
+      address: FieldValue.delete(),
+      notes: FieldValue.delete(),
+      instaPaySender: FieldValue.delete(),
+      instaPayCustomerRef: FieldValue.delete()
+    })
+  );
+}
+
+// Full Account Deletion via Firebase Admin SDK (deletes Auth account + Firestore user/provider/cart docs + cleans up user data)
 app.post(
   '/api/admin/delete-user',
   adminActionLimiter,
@@ -514,7 +562,15 @@ app.post(
         adminDb.collection('carts').doc(targetUid).delete()
       ]);
 
-      res.json({ ok: true, authDeleted });
+      let dataCleaned = true;
+      try {
+        await cleanupUserData(adminDb, targetUid);
+      } catch (err) {
+        dataCleaned = false;
+        console.error('Admin delete user: data cleanup failed:', err);
+      }
+
+      res.json({ ok: true, authDeleted, dataCleaned });
     } catch (err) {
       console.error('Admin delete user error:', err);
       res.status(500).json({
