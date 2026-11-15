@@ -358,7 +358,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         banned?: boolean;
         banUntilMs?: number;
         isPermanent?: boolean;
-        reason?: string;
       };
       if (data.banned) {
         const expiryText = data.isPermanent
@@ -371,7 +370,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ? 'حظر نشط'
           : 'Active ban';
         return lang === 'ar'
-          ? `رقم الموبايل (${normalizedPhone}) محظور من المنصة (${expiryText})${data.reason ? ` - السبب: ${data.reason}` : ''}.`
+          ? `رقم الموبايل (${normalizedPhone}) محظور من المنصة (${expiryText}).`
           : `Phone number (${normalizedPhone}) is currently banned (${expiryText}).`;
       }
     } catch {

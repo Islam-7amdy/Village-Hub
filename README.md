@@ -22,7 +22,7 @@
    ثم قم بتعبئة القيم المناسبة داخل `.env`:
    - `PORT`: منفذ السيرفر (الافتراضي `3000`)
    - `GEMINI_API_KEY`: مفتاح Gemini API (اختياري للمساعد الذكي؛ يعمل التطبيق بدونه بردود محلية بديلة)
-   - `GEMINI_MODEL`: اسم الموديل المستخدم للمساعد الذكي (الافتراضي `gemini-4-hydrogen`)
+   - `GEMINI_MODEL`: اسم الموديل المستخدم للمساعد الذكي (الافتراضي `gemini-4-hydrogen`). تأكد من صحة الاسم من قائمة موديلات Google الرسمية؛ السيرفر بيطبع الموديل المستخدم عند التشغيل، ولو الاسم غلط المساعد بيرد بالرد الاحتياطي ويظهر الخطأ في لوج السيرفر
    - `APP_URL`: رابط التطبيق
    - `VITE_RECAPTCHA_SITE_KEY`: مفتاح reCAPTCHA v3 لتفعيل Firebase App Check في الواجهة (اختياري)
    - `FIREBASE_SERVICE_ACCOUNT_JSON`: بيانات Service Account الخاصة بـ Firebase Admin SDK بصيغة JSON (لتفعيل التحقق الكامل وحذف المستخدمين من Auth وفحص الحظر قبل إرسال SMS)
@@ -72,7 +72,7 @@
 
 3. **Firebase Admin SDK على الخادم (`FIREBASE_SERVICE_ACCOUNT_JSON`):**
    اضبط `FIREBASE_SERVICE_ACCOUNT_JSON` (أو `GOOGLE_APPLICATION_CREDENTIALS`) حتى يتمكن الخادم من:
-   - حذف حسابات المستخدمين نهائياً من Firebase Authentication + Firestore عند الحذف من لوحة الأدمن (`/api/admin/delete-user`).
+   - حذف حسابات المستخدمين نهائياً من Firebase Authentication + Firestore عند الحذف من لوحة الأدمن (`/api/admin/delete-user`)، مع حذف إعلاناته وبيانات التحليلات، وإخفاء هويته من تقييماته وطلباته (الطلبات تفضل محفوظة للتسوية المالية بدون الاسم والتليفون والعنوان).
    - التحقق السريع من أرقام الهواتف المحظورة قبل إرسال رسائل SMS OTP (`/api/auth/check-ban`).
 
 4. **حماية مفتاح Firebase API وSMS Quota (إجراء مطلوب في لوحة التحكم):**

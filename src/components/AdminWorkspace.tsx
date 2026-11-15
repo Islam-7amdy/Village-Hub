@@ -1017,6 +1017,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
 
       let serverAuthDeleted = false;
       let serverUnconfigured = false;
+      let dataCleaned = true;
 
       const idToken = await auth.currentUser?.getIdToken().catch(() => null);
       if (idToken) {
@@ -1031,6 +1032,8 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
           });
           if (res.ok) {
             serverAuthDeleted = true;
+            const okPayload = (await res.json().catch(() => ({}))) as { dataCleaned?: boolean };
+            dataCleaned = okPayload.dataCleaned !== false;
           } else {
             const payload = (await res.json().catch(() => ({}))) as {
               reason?: string;
@@ -1072,7 +1075,13 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
       }
 
       setConfirmDeleteUid(null);
-      if (serverAuthDeleted) {
+      if (serverAuthDeleted && !dataCleaned) {
+        showToast(
+          lang === 'ar'
+            ? `تم حذف حساب ${user.displayName} لكن تعذر تنضيف بعض بياناته (راجع لوج السيرفر)`
+            : `Deleted ${user.displayName}, but some of their data could not be cleaned up (check server logs)`
+        );
+      } else if (serverAuthDeleted) {
         showToast(
           lang === 'ar'
             ? `تم حذف حساب ${user.displayName} بالكامل (Auth + Firestore) ✓`
