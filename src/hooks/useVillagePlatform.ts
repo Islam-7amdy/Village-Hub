@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import {
   collection,
@@ -17,7 +17,6 @@ import {
   DEFAULT_DISTRICTS,
   DEFAULT_SERVICE_SECTIONS,
   DEFAULT_VILLAGES,
-  INITIAL_VILLAGE_ADS,
   Language,
   PlatformPricingConfig,
   ServiceSectionConfig,
@@ -27,6 +26,7 @@ import {
   VillageConfig,
   getVillageTheme
 } from '../data/villageData';
+import { INITIAL_VILLAGE_ADS } from '../data/demoSeedData';
 
 export interface UseVillagePlatformOptions {
   lang: Language;
@@ -84,6 +84,7 @@ export function useVillagePlatform({
       return [];
     }
   });
+  const lastTrackedRef = useRef<Map<string, number>>(new Map());
 
   // 1. Village Config + App Settings Listeners
   useEffect(() => {
@@ -283,9 +284,11 @@ export function useVillagePlatform({
   const allAds = useMemo<VillageAd[]>(() => {
     const map = new Map<string, VillageAd>();
     firestoreAds.forEach((a) => map.set(a.id, a));
-    INITIAL_VILLAGE_ADS.forEach((a) => {
-      if (!map.has(a.id)) map.set(a.id, a);
-    });
+    if (import.meta.env.DEV) {
+      INITIAL_VILLAGE_ADS.forEach((a) => {
+        if (!map.has(a.id)) map.set(a.id, a);
+      });
+    }
     Object.values(editedAdsMap).forEach((a) => map.set(a.id, a));
     deletedAdIds.forEach((id) => map.delete(id));
     return Array.from(map.values());
@@ -294,14 +297,17 @@ export function useVillagePlatform({
   const trackAnalyticsEvent = useCallback(
     async (eventType: AnalyticsEventType, targetId: string, targetLabel: string) => {
       if (isAdmin) return;
+      const now = Date.now();
+      const dedupKey = `${eventType}:${targetId.slice(0, 80)}`;
+      const prevTs = lastTrackedRef.current.get(dedupKey);
+      if (typeof prevTs === 'number' && now - prevTs < 60000) {
+        return;
+      }
+      lastTrackedRef.current.set(dedupKey, now);
+
       const evt: AnalyticsEventRecord = {
-        id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: `evt-${now}-${Math.random().toString(36).slice(2, 7)}`,
         ownerId: effectiveUid || 'guest',
-        userName:
-          effectiveProfile?.displayName ||
-          firebaseUser?.displayName ||
-          (lang === 'ar' ? 'زائر قرية نقباس' : 'Noqbas Visitor'),
-        userPhone: effectiveProfile?.phone || '',
         userRole:
           effectiveProfile?.role === 'provider'
             ? 'provider'
@@ -312,7 +318,7 @@ export function useVillagePlatform({
         targetId: targetId.slice(0, 80),
         targetLabel: targetLabel.slice(0, 120),
         villageId: activeVillage.id,
-        createdAtMs: Date.now()
+        createdAtMs: now
       };
 
       setAnalyticsEvents((prev) => {
@@ -341,17 +347,7 @@ export function useVillagePlatform({
         }
       }
     },
-    [
-      isAdmin,
-      effectiveUid,
-      effectiveProfile?.displayName,
-      effectiveProfile?.phone,
-      effectiveProfile?.role,
-      firebaseUser,
-      lang,
-      activeVillage.id,
-      isCurrentUserBanned
-    ]
+    [isAdmin, effectiveUid, effectiveProfile?.role, firebaseUser, activeVillage.id, isCurrentUserBanned]
   );
 
   const handleSaveSection = useCallback(

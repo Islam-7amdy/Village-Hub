@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -8,7 +9,25 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-export const ADMIN_EMAIL = 'hamzaislam1518@gmail.com';
+const recaptchaSiteKey = (
+  import.meta.env.VITE_RECAPTCHA_SITE_KEY ||
+  (firebaseConfig as { recaptchaSiteKey?: string }).recaptchaSiteKey ||
+  ''
+).trim();
+
+if (typeof window !== 'undefined' && recaptchaSiteKey) {
+  if (import.meta.env.DEV) {
+    (self as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  }
+  try {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(recaptchaSiteKey),
+      isTokenAutoRefreshEnabled: true
+    });
+  } catch (err) {
+    console.warn('App Check initialization skipped:', err);
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',

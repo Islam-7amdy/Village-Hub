@@ -60,8 +60,8 @@ export const PharmacySection: React.FC<PharmacySectionProps> = ({
       providerName: item.ownerId
         ? item.name[lang].split(' - ')[0]
         : lang === 'ar'
-        ? 'صيدلية الشفاء - قرية نقباس'
-        : 'Al-Shifa Pharmacy - Noqbas',
+        ? 'صيدليات القرية المعتمدة'
+        : 'Village Partner Pharmacy',
       providerOwnerId: item.ownerId
     });
     setAddedIds((prev) => ({ ...prev, [item.id]: true }));
@@ -81,7 +81,7 @@ export const PharmacySection: React.FC<PharmacySectionProps> = ({
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">{t.pharmacy}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {lang === 'ar' ? 'صيدلية الشفاء · صرف روشتات، أدوية ضغط وسكر، وتوصيل للبيت حسب المسافة' : 'Village pharmacy, prescription fulfillment, and doorstep delivery by distance'}
+              {lang === 'ar' ? 'صرف روشتات طبية، أدوية ضغط وسكر، وتوصيل للبيت حسب المسافة' : 'Village pharmacy, prescription fulfillment, and doorstep delivery by distance'}
             </p>
           </div>
         </div>
@@ -107,7 +107,7 @@ export const PharmacySection: React.FC<PharmacySectionProps> = ({
           />
           <div>
             <div className="font-bold text-slate-900 dark:text-white">
-              {lang === 'ar' ? 'صيدلية الشفاء المركزية (د. هدى الصيدلانية)' : 'Al-Shifa Central Pharmacy (Dr. Huda)'}
+              {lang === 'ar' ? 'خدمة الصيدلية وصرف الروشتات بالقرية' : 'Village Pharmacy & Prescription Fulfillment'}
             </div>
             <div className="text-slate-500 dark:text-slate-400 mt-0.5">
               {lang === 'ar' ? 'توصيل سريع لعلاج كبار السن والأطفال لحد باب البيت والدفع عند الاستلام' : 'Express doorstep medicine delivery for seniors and families'}

@@ -7,11 +7,13 @@ import {
   getServiceStatusLabel,
   isAdExpired,
   isBanCurrentlyActive,
+  isOrderEligibleForReview,
   maskReferenceCode,
   matchesDeliveryReference,
   normalizePhone,
   parsePriceEgp,
-  toE164Phone
+  toE164Phone,
+  validateBookingFinancials
 } from '../src/data/villageData.ts';
 
 test('normalizePhone converts Egyptian local and international numbers consistently', () => {
@@ -122,4 +124,93 @@ test('matchesDeliveryReference and maskReferenceCode verify customer handover co
   assert.equal(matchesDeliveryReference('849201', 'NQB-849201'), true);
   assert.equal(matchesDeliveryReference('1234', 'NQB-849201'), false);
   assert.equal(maskReferenceCode('NQB-849201'), '••••01');
+});
+
+test('validateBookingFinancials checks totals and payment method fees strictly', () => {
+  assert.equal(
+    validateBookingFinancials({
+      subtotalEgp: 100,
+      deliveryFeeEgp: 15,
+      codFeeEgp: 0,
+      totalAmountEgp: 115,
+      paymentMethod: 'instapay'
+    }),
+    true
+  );
+  assert.equal(
+    validateBookingFinancials({
+      subtotalEgp: 100,
+      deliveryFeeEgp: 15,
+      codFeeEgp: 10,
+      totalAmountEgp: 125,
+      paymentMethod: 'cod'
+    }),
+    true
+  );
+  assert.equal(
+    validateBookingFinancials({
+      subtotalEgp: 100,
+      deliveryFeeEgp: 15,
+      codFeeEgp: 0,
+      totalAmountEgp: 115,
+      paymentMethod: 'cod'
+    }),
+    false
+  );
+  assert.equal(
+    validateBookingFinancials({
+      subtotalEgp: 100,
+      deliveryFeeEgp: 15,
+      codFeeEgp: 0,
+      totalAmountEgp: 10,
+      paymentMethod: 'instapay'
+    }),
+    false
+  );
+});
+
+test('isOrderEligibleForReview restricts reviews to completed unreviewed orders of the reviewer', () => {
+  const completedOrder = {
+    id: 'book-123',
+    ownerId: 'user-1',
+    providerOwnerId: 'doc-1',
+    serviceType: 'doctor' as const,
+    title: 'كشف باطنة',
+    providerName: 'د. محمد',
+    customerName: 'عميل',
+    customerPhone: '01012345678',
+    address: 'وسط البلد',
+    date: '2026-11-15',
+    status: 'completed' as const,
+    createdAt: '2026-11-15'
+  };
+
+  assert.equal(isOrderEligibleForReview(completedOrder, 'prov-doc-1', 'user-1', []), true);
+  assert.equal(isOrderEligibleForReview(completedOrder, 'doc-1', 'user-1', []), true);
+  assert.equal(isOrderEligibleForReview(completedOrder, 'prov-doc-1', 'other-user', []), false);
+  assert.equal(
+    isOrderEligibleForReview(
+      { ...completedOrder, status: 'pending' },
+      'prov-doc-1',
+      'user-1',
+      []
+    ),
+    false
+  );
+  assert.equal(
+    isOrderEligibleForReview(completedOrder, 'prov-doc-1', 'user-1', [
+      {
+        id: 'rev-book-123',
+        bookingId: 'book-123',
+        targetId: 'prov-doc-1',
+        author: 'عميل',
+        neighborhood: { ar: 'وسط البلد', en: 'Center' },
+        rating: 5,
+        date: '2026-11-15',
+        comment: { ar: 'ممتاز', en: 'Great' },
+        isVerifiedResident: true
+      }
+    ]),
+    false
+  );
 });

@@ -18,17 +18,20 @@ import {
   DoctorService,
   FoodItem,
   GroceryItem,
-  INITIAL_REVIEWS,
   Language,
   OtherService,
   PharmacyItem,
   ProviderAvailabilityConfig,
   ProviderListing,
   ReviewItem,
-  TEST_DEMO_PROVIDERS,
   TechnicianService,
   TutoringService,
   UserProfile,
+  VillageRide
+} from '../data/villageData';
+import {
+  INITIAL_REVIEWS,
+  TEST_DEMO_PROVIDERS,
   VILLAGE_CHARITIES,
   VILLAGE_DOCTORS,
   VILLAGE_FOOD_ITEMS,
@@ -37,9 +40,8 @@ import {
   VILLAGE_PHARMACY_ITEMS,
   VILLAGE_RIDES,
   VILLAGE_TECHNICIANS,
-  VILLAGE_TUTORING_SERVICES,
-  VillageRide
-} from '../data/villageData';
+  VILLAGE_TUTORING_SERVICES
+} from '../data/demoSeedData';
 
 export interface UseProvidersOptions {
   lang: Language;
@@ -85,8 +87,12 @@ export function useProviders({
 }: UseProvidersOptions) {
   const [firestoreProviders, setFirestoreProviders] = useState<ProviderListing[]>([]);
   const [firestoreReviews, setFirestoreReviews] = useState<ReviewItem[]>([]);
-  const [localDoctors, setLocalDoctors] = useState<DoctorService[]>(VILLAGE_DOCTORS);
-  const [localTechnicians, setLocalTechnicians] = useState<TechnicianService[]>(VILLAGE_TECHNICIANS);
+  const [localDoctors, setLocalDoctors] = useState<DoctorService[]>(
+    import.meta.env.DEV ? VILLAGE_DOCTORS : []
+  );
+  const [localTechnicians, setLocalTechnicians] = useState<TechnicianService[]>(
+    import.meta.env.DEV ? VILLAGE_TECHNICIANS : []
+  );
   const [demoProviderAvailabilityMap, setDemoProviderAvailabilityMap] = useState<
     Record<string, ProviderAvailabilityConfig>
   >(() => {
@@ -163,6 +169,7 @@ export function useProviders({
         const mapped: ReviewItem[] = snap.docs.map((d) => {
           const data = d.data() as {
             targetId: string;
+            bookingId?: string;
             villageId?: string;
             author: string;
             neighborhood?: string;
@@ -175,6 +182,7 @@ export function useProviders({
           return {
             id: d.id,
             targetId: data.targetId,
+            bookingId: data.bookingId,
             villageId: data.villageId,
             author: data.author,
             neighborhood: { ar: nb, en: nb },
@@ -194,21 +202,23 @@ export function useProviders({
   const mergedProviders = useMemo<ProviderListing[]>(() => {
     const map = new Map<string, ProviderListing>();
     firestoreProviders.forEach((p) => map.set(p.id, p));
-    TEST_DEMO_PROVIDERS.forEach((p) => {
-      if (deletedDemoUids.includes(p.ownerId)) return;
-      if (!map.has(p.id)) {
-        const patch = demoProfilePatch[p.ownerId] || {};
-        const availPatch =
-          demoProviderAvailabilityMap[p.id] || demoProviderAvailabilityMap[p.ownerId] || {};
-        map.set(p.id, {
-          ...p,
-          ...availPatch,
-          nameAr: patch.displayName || p.nameAr,
-          nameEn: patch.displayName || p.nameEn,
-          status: demoProviderStatusMap[p.id] || p.status
-        });
-      }
-    });
+    if (import.meta.env.DEV) {
+      TEST_DEMO_PROVIDERS.forEach((p) => {
+        if (deletedDemoUids.includes(p.ownerId)) return;
+        if (!map.has(p.id)) {
+          const patch = demoProfilePatch[p.ownerId] || {};
+          const availPatch =
+            demoProviderAvailabilityMap[p.id] || demoProviderAvailabilityMap[p.ownerId] || {};
+          map.set(p.id, {
+            ...p,
+            ...availPatch,
+            nameAr: patch.displayName || p.nameAr,
+            nameEn: patch.displayName || p.nameEn,
+            status: demoProviderStatusMap[p.id] || p.status
+          });
+        }
+      });
+    }
     return Array.from(map.values());
   }, [
     firestoreProviders,
@@ -236,9 +246,11 @@ export function useProviders({
   const reviews = useMemo(() => {
     const map = new Map<string, ReviewItem>();
     firestoreReviews.forEach((r) => map.set(r.id, r));
-    INITIAL_REVIEWS.forEach((r) => {
-      if (!map.has(r.id)) map.set(r.id, r);
-    });
+    if (import.meta.env.DEV) {
+      INITIAL_REVIEWS.forEach((r) => {
+        if (!map.has(r.id)) map.set(r.id, r);
+      });
+    }
     return Array.from(map.values());
   }, [firestoreReviews]);
 
@@ -382,18 +394,19 @@ export function useProviders({
         try {
           await setDoc(doc(db, 'reviews', newReview.id), {
             ownerId: firebaseUser.uid,
-            targetId: newReview.targetId,
+            targetId: newReview.targetId.slice(0, 80),
+            ...(newReview.bookingId ? { bookingId: newReview.bookingId.slice(0, 80) } : {}),
             villageId: activeVillageId,
             author: newReview.author.slice(0, 80),
             neighborhood: (newReview.neighborhood[lang] || 'وسط البلد').slice(0, 100),
             rating: newReview.rating,
             comment: (newReview.comment[lang] || '').slice(0, 500),
             date: newReview.date.slice(0, 30),
-            isVerifiedResident: newReview.isVerifiedResident,
+            isVerifiedResident: true,
             createdAt: serverTimestamp()
           });
         } catch (err) {
-          console.warn('Firestore review save warning:', err);
+          handleFirestoreError(err, OperationType.CREATE, `reviews/${newReview.id}`);
         }
       } else {
         setFirestoreReviews((prev) => [newReview, ...prev]);
@@ -497,7 +510,7 @@ export function useProviders({
           availability: toAvailabilityConfig(p)
         };
       });
-    return [...customFoods, ...VILLAGE_FOOD_ITEMS];
+    return [...customFoods, ...(import.meta.env.DEV ? VILLAGE_FOOD_ITEMS : [])];
   }, [approvedProviders]);
 
   const allPharmacy = useMemo<PharmacyItem[]>(() => {
@@ -519,7 +532,7 @@ export function useProviders({
           availability: toAvailabilityConfig(p)
         };
       });
-    return [...customPh, ...VILLAGE_PHARMACY_ITEMS];
+    return [...customPh, ...(import.meta.env.DEV ? VILLAGE_PHARMACY_ITEMS : [])];
   }, [approvedProviders]);
 
   const allGrocery = useMemo<GroceryItem[]>(() => {
@@ -541,7 +554,7 @@ export function useProviders({
           availability: toAvailabilityConfig(p)
         };
       });
-    return [...customGrocery, ...VILLAGE_GROCERY_ITEMS];
+    return [...customGrocery, ...(import.meta.env.DEV ? VILLAGE_GROCERY_ITEMS : [])];
   }, [approvedProviders]);
 
   const allTutors = useMemo<TutoringService[]>(() => {
@@ -562,7 +575,7 @@ export function useProviders({
         mode: { ar: p.bioAr || 'مجموعات أو دروس خاصة', en: p.bioEn || 'Small groups or private' },
         availability: toAvailabilityConfig(p)
       }));
-    return [...customTutors, ...VILLAGE_TUTORING_SERVICES];
+    return [...customTutors, ...(import.meta.env.DEV ? VILLAGE_TUTORING_SERVICES : [])];
   }, [approvedProviders]);
 
   const allCharities = useMemo<CharityOrg[]>(() => {
@@ -580,7 +593,7 @@ export function useProviders({
         donationExample: { ar: p.priceLabelAr || 'مساهمة مفتوحة أو تطوع', en: p.priceLabelEn || 'Any contribution or volunteer' },
         availability: toAvailabilityConfig(p)
       }));
-    return [...customCharities, ...VILLAGE_CHARITIES];
+    return [...customCharities, ...(import.meta.env.DEV ? VILLAGE_CHARITIES : [])];
   }, [approvedProviders]);
 
   const allRides = useMemo<VillageRide[]>(() => {
@@ -600,7 +613,7 @@ export function useProviders({
         phone: p.phone,
         availability: toAvailabilityConfig(p)
       }));
-    return [...customRides, ...VILLAGE_RIDES];
+    return [...customRides, ...(import.meta.env.DEV ? VILLAGE_RIDES : [])];
   }, [approvedProviders]);
 
   const allOtherServices = useMemo<OtherService[]>(() => {
@@ -619,7 +632,7 @@ export function useProviders({
         phone: p.phone,
         availability: toAvailabilityConfig(p)
       }));
-    return [...customOthers, ...VILLAGE_OTHER_SERVICES];
+    return [...customOthers, ...(import.meta.env.DEV ? VILLAGE_OTHER_SERVICES : [])];
   }, [approvedProviders]);
 
   return {

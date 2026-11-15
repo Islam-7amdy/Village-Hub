@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import { auth } from '../../firebase';
 import { Language } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
-import { X, Sparkles, Send, Loader2, MessageSquare, Bot } from 'lucide-react';
+import { X, Send, Loader2, Bot } from 'lucide-react';
 
 interface VillageAssistantModalProps {
   isOpen: boolean;
@@ -44,28 +45,73 @@ export const VillageAssistantModal: React.FC<VillageAssistantModalProps> = ({
   ];
 
   const handleAsk = async (queryText?: string) => {
-    const q = (queryText || question).trim();
-    if (!q) return;
+    const q = (queryText || question).trim().slice(0, 300);
+    if (!q || isLoading) return;
 
     setChatLog((prev) => [...prev, { sender: 'user', text: q }]);
-    setQuestion('');
-    setIsLoading(true);
+    if (!queryText) setQuestion('');
 
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      setChatLog((prev) => [
+        ...prev,
+        {
+          sender: 'assistant',
+          text:
+            lang === 'ar'
+              ? 'يرجى تسجيل الدخول بحساب فعلي أولاً لاستخدام المساعد الذكي.'
+              : 'Please sign in with a registered account first to use the assistant.'
+        }
+      ]);
+      return;
+    }
+
+    setIsLoading(true);
     try {
+      const idToken = await currentUser.getIdToken();
       const res = await fetch('/api/village-assistant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`
+        },
         body: JSON.stringify({ question: q, language: lang, villageName: vName })
       });
 
-      if (!res.ok) throw new Error('Assistant API error');
-      const data = await res.json();
-      setChatLog((prev) => [...prev, { sender: 'assistant', text: data.answer }]);
+      const data = (await res.json().catch(() => ({}))) as { answer?: string; error?: string };
+      if (!res.ok) {
+        const msg =
+          res.status === 429
+            ? lang === 'ar'
+              ? 'تم إرسال أسئلة كثيرة خلال دقيقة واحدة. استنى لحظة وجرب تاني.'
+              : 'Too many requests in a short window. Please wait a minute.'
+            : res.status === 401 || res.status === 403
+            ? data.error ||
+              (lang === 'ar'
+                ? 'الحساب غير مصرح له أو محظور من استخدام المساعد.'
+                : 'Account unauthorized or restricted.')
+            : data.error || 'Assistant error';
+        setChatLog((prev) => [...prev, { sender: 'assistant', text: msg }]);
+        return;
+      }
+
+      setChatLog((prev) => [
+        ...prev,
+        {
+          sender: 'assistant',
+          text:
+            data.answer ||
+            (lang === 'ar'
+              ? 'تقدر تستعرض الأقسام المعتمدة من الصفحة الرئيسية للوصول لمقدمي الخدمة.'
+              : 'Browse the approved service sections from the home screen to reach registered providers.')
+        }
+      ]);
     } catch (e) {
       console.error(e);
-      const fallback = lang === 'ar'
-        ? 'أهلاً بيك! تقدر تفتح قسم الصنايعية وتكلم الأسطى أبو أحمد الكهربائي (01045678901)، أو قسم الدكاترة تحجز مع د. طارق (100 ج.م)، أو تطلب فطير سخن من فرن البركة!'
-        : 'Hello! You can check the Technicians tab to call Abu Ahmad the Electrician (01045678901), visit the Doctors tab for Dr. Tariq (100 EGP), or order fresh feteer from Al-Baraka Bakery!';
+      const fallback =
+        lang === 'ar'
+          ? 'تعذر الاتصال بالمساعد حالياً. تقدر تفتح الأقسام المعتمدة في الرئيسية أو تراجع دليل الطوارئ الرسمي.'
+          : 'Could not reach the assistant right now. Browse approved village sections from Home or open the Emergency Directory.';
       setChatLog((prev) => [...prev, { sender: 'assistant', text: fallback }]);
     } finally {
       setIsLoading(false);
@@ -144,22 +190,28 @@ export const VillageAssistantModal: React.FC<VillageAssistantModalProps> = ({
             e.preventDefault();
             handleAsk();
           }}
-          className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2.5 shrink-0"
+          className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-1.5 shrink-0"
         >
-          <input
-            type="text"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            placeholder={t.aiPlaceholder}
-            className="flex-1 px-4 py-2.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !question.trim()}
-            className="p-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white transition-colors cursor-pointer shrink-0"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2.5">
+            <input
+              type="text"
+              maxLength={300}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder={t.aiPlaceholder}
+              className="flex-1 px-4 py-2.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !question.trim()}
+              className="p-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white transition-colors cursor-pointer shrink-0"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="text-[10px] text-slate-400 text-end font-mono tabular-nums">
+            {question.length}/300
+          </div>
         </form>
       </div>
     </div>

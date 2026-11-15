@@ -14,6 +14,7 @@ interface ProviderReviewsModalProps {
   reviewsCount: number;
   reviews: ReviewItem[];
   lang: Language;
+  eligibleReviewsCount?: number;
   onOpenAddReview: () => void;
 }
 
@@ -28,6 +29,7 @@ export const ProviderReviewsModal: React.FC<ProviderReviewsModalProps> = ({
   reviewsCount,
   reviews,
   lang,
+  eligibleReviewsCount = 0,
   onOpenAddReview
 }) => {
   const t = TRANSLATIONS[lang];
@@ -104,13 +106,22 @@ export const ProviderReviewsModal: React.FC<ProviderReviewsModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onOpenAddReview}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 transition-colors cursor-pointer shadow-xs shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{t.addReview}</span>
-          </button>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <button
+              onClick={onOpenAddReview}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 transition-colors cursor-pointer shadow-xs shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{t.addReview}</span>
+            </button>
+            {eligibleReviewsCount === 0 && (
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                {lang === 'ar'
+                  ? 'يتطلب إتمام طلب مكتمل لإضافة تقييم'
+                  : 'Requires a completed order to review'}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Reviews List */}

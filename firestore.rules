@@ -37,10 +37,8 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && (
-        (request.auth.token.email == 'hamzaislam1518@gmail.com' && request.auth.token.email_verified == true) ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
     function isNotBannedUser() {
@@ -150,7 +148,7 @@ service cloud.firestore {
         (!('scheduleEnabled' in data) || (data.scheduleEnabled is bool)) &&
         (!('openTime' in data) || (data.openTime is string && data.openTime.size() <= 10 && data.openTime.matches('^([01]\\d|2[0-3]):[0-5]\\d$'))) &&
         (!('closeTime' in data) || (data.closeTime is string && data.closeTime.size() <= 10 && data.closeTime.matches('^([01]\\d|2[0-3]):[0-5]\\d$'))) &&
-        (!('workingDays' in data) || (data.workingDays is list && data.workingDays.size() <= 7 && (data.workingDays.size() == 0 || (data.workingDays[0] is number && data.workingDays[0] >= 0 && data.workingDays[0] <= 6)))) &&
+        (!('workingDays' in data) || (data.workingDays is list && data.workingDays.size() <= 7 && data.workingDays.hasOnly([0, 1, 2, 3, 4, 5, 6]))) &&
         data.status in ['pending', 'approved', 'rejected'] &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -208,7 +206,7 @@ service cloud.firestore {
         (!('time' in data) || (data.time is string && data.time.size() <= 40)) &&
         (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
         (!('itemsSummary' in data) || (data.itemsSummary is string && data.itemsSummary.size() <= 400)) &&
-        (!('paymentMethod' in data) || (data.paymentMethod in ['card', 'vodafone_cash', 'instapay', 'cod'])) &&
+        (!('paymentMethod' in data) || (data.paymentMethod in ['instapay', 'cod'])) &&
         (!('paymentStatus' in data) || (data.paymentStatus in ['paid', 'pending_verification', 'pending_cod', 'rejected'])) &&
         (!('providerVisible' in data) || (data.providerVisible is bool)) &&
         (!('instaPaySender' in data) || (data.instaPaySender is string && data.instaPaySender.size() <= 60)) &&
@@ -227,10 +225,11 @@ service cloud.firestore {
     function isValidReview(data) {
       return data.keys().hasAll(['ownerId', 'targetId', 'villageId', 'author', 'rating', 'comment', 'date', 'isVerifiedResident', 'createdAt']) &&
         data.keys().hasOnly([
-          'ownerId', 'targetId', 'villageId', 'author', 'neighborhood', 'rating',
+          'ownerId', 'bookingId', 'targetId', 'villageId', 'author', 'neighborhood', 'rating',
           'comment', 'date', 'isVerifiedResident', 'createdAt'
         ]) &&
         isValidId(data.ownerId) &&
+        (!('bookingId' in data) || isValidId(data.bookingId)) &&
         data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
         isValidId(data.villageId) &&
         data.author is string && data.author.size() >= 1 && data.author.size() <= 80 &&
@@ -240,6 +239,14 @@ service cloud.firestore {
         data.date is string && data.date.size() >= 4 && data.date.size() <= 30 &&
         data.isVerifiedResident is bool &&
         data.createdAt is timestamp;
+    }
+
+    function isEligibleBookingForReview(bookingData, revData) {
+      return bookingData.ownerId == request.auth.uid &&
+        bookingData.status == 'completed' &&
+        ('providerOwnerId' in bookingData) &&
+        (bookingData.providerOwnerId == revData.targetId ||
+         ('prov-' + bookingData.providerOwnerId) == revData.targetId);
     }
 
     function isValidAppSettings(data) {
@@ -275,12 +282,10 @@ service cloud.firestore {
     function isValidAnalyticsEvent(data) {
       return data.keys().hasAll(['ownerId', 'eventType', 'targetId', 'villageId', 'createdAtMs', 'createdAt']) &&
         data.keys().hasOnly([
-          'ownerId', 'userName', 'userPhone', 'userRole', 'eventType',
+          'ownerId', 'userRole', 'eventType',
           'targetId', 'targetLabel', 'villageId', 'createdAtMs', 'createdAt'
         ]) &&
         isValidId(data.ownerId) &&
-        (!('userName' in data) || (data.userName is string && data.userName.size() <= 80)) &&
-        (!('userPhone' in data) || (data.userPhone is string && data.userPhone.size() <= 30)) &&
         (!('userRole' in data) || (data.userRole in ['resident', 'provider', 'admin', 'guest'])) &&
         data.eventType in ['section_view', 'ad_view', 'ad_click', 'provider_view'] &&
         data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
@@ -329,6 +334,7 @@ service cloud.firestore {
       allow create, update: if isValidId(userId) &&
         isOwner(userId) &&
         isVerifiedUser() &&
+        isNotBannedUser() &&
         isValidUserCart(incoming()) &&
         incoming().ownerId == request.auth.uid &&
         incoming().updatedAt == request.time;
@@ -481,9 +487,24 @@ service cloud.firestore {
           isAdmin() ||
           (
             incoming().status == 'pending' &&
+            incoming().get('settlementStatus', 'pending') == 'pending' &&
+            !('paymentVerifiedAt' in incoming()) &&
+            !('settledAt' in incoming()) &&
+            !('adminNotes' in incoming()) &&
+            incoming().paymentMethod in ['instapay', 'cod'] &&
+            incoming().subtotalEgp is number && incoming().subtotalEgp > 0 &&
+            incoming().totalAmountEgp is number && incoming().totalAmountEgp > 0 &&
+            incoming().totalAmountEgp >= (incoming().subtotalEgp + incoming().get('deliveryFeeEgp', 0) + incoming().get('codFeeEgp', 0) - 0.01) &&
+            incoming().totalAmountEgp <= (incoming().subtotalEgp + incoming().get('deliveryFeeEgp', 0) + incoming().get('codFeeEgp', 0) + 0.01) &&
             (
-              (incoming().get('paymentMethod', 'cod') == 'instapay' && incoming().get('paymentStatus', '') == 'pending_verification' && incoming().get('providerVisible', false) == false) ||
-              (incoming().get('paymentMethod', 'cod') != 'instapay' && incoming().get('providerVisible', true) == true)
+              (incoming().paymentMethod == 'instapay' &&
+                incoming().paymentStatus == 'pending_verification' &&
+                incoming().providerVisible == false &&
+                incoming().get('codFeeEgp', 0) == 0) ||
+              (incoming().paymentMethod == 'cod' &&
+                incoming().paymentStatus == 'pending_cod' &&
+                incoming().providerVisible == true &&
+                incoming().get('codFeeEgp', 0) == 10)
             )
           )
         );
@@ -529,6 +550,15 @@ service cloud.firestore {
         isNotBannedUser() &&
         isValidReview(incoming()) &&
         incoming().ownerId == request.auth.uid &&
+        incoming().isVerifiedResident == true &&
+        'bookingId' in incoming() &&
+        isValidId(incoming().bookingId) &&
+        reviewId == ('rev-' + incoming().bookingId) &&
+        exists(/databases/$(database)/documents/bookings/$(incoming().bookingId)) &&
+        isEligibleBookingForReview(
+          get(/databases/$(database)/documents/bookings/$(incoming().bookingId)).data,
+          incoming()
+        ) &&
         incoming().createdAt == request.time;
       allow update: if false;
       allow delete: if isValidId(reviewId) && (isAdmin() || isOwner(existing().ownerId));

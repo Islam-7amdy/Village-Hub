@@ -153,7 +153,7 @@
         "time": { "type": "string", "maxLength": 40 },
         "notes": { "type": "string", "maxLength": 400 },
         "itemsSummary": { "type": "string", "maxLength": 400 },
-        "paymentMethod": { "type": "string", "enum": ["card", "vodafone_cash", "instapay", "cod"] },
+        "paymentMethod": { "type": "string", "enum": ["instapay", "cod"] },
         "paymentStatus": { "type": "string", "enum": ["paid", "pending_verification", "pending_cod", "rejected"] },
         "providerVisible": { "type": "boolean" },
         "instaPaySender": { "type": "string", "maxLength": 60 },
@@ -176,6 +176,7 @@
       "type": "object",
       "properties": {
         "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bookingId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "author": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -186,7 +187,7 @@
         "isVerifiedResident": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["ownerId", "targetId", "villageId", "author", "rating", "comment", "date", "isVerifiedResident", "createdAt"]
+      "required": ["ownerId", "bookingId", "targetId", "villageId", "author", "rating", "comment", "date", "isVerifiedResident", "createdAt"]
     },
     "AppSettings": {
       "title": "AppSettings",
@@ -227,8 +228,6 @@
       "type": "object",
       "properties": {
         "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "userName": { "type": "string", "maxLength": 80 },
-        "userPhone": { "type": "string", "maxLength": 30 },
         "userRole": { "type": "string", "enum": ["resident", "provider", "admin", "guest"] },
         "eventType": { "type": "string", "enum": ["section_view", "ad_view", "ad_click", "provider_view"] },
         "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },

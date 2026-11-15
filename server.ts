@@ -1,19 +1,166 @@
 import express from 'express';
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
+import rateLimit from 'express-rate-limit';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import {
+  applicationDefault,
+  cert,
+  getApp,
+  getApps,
+  initializeApp,
+  type App,
+  type ServiceAccount
+} from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
+import { getFirestore as getAdminFirestore, type Firestore } from 'firebase-admin/firestore';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+interface FirebaseWebConfig {
+  projectId: string;
+  apiKey: string;
+  firestoreDatabaseId: string;
+}
+
+function loadFirebaseConfig(): FirebaseWebConfig {
+  const candidates = [
+    path.resolve(__dirname, 'firebase-applet-config.json'),
+    path.resolve(process.cwd(), 'firebase-applet-config.json')
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        return JSON.parse(fs.readFileSync(p, 'utf8')) as FirebaseWebConfig;
+      }
+    } catch {
+      // Try next path
+    }
+  }
+  return {
+    projectId: process.env.FIREBASE_PROJECT_ID || '',
+    apiKey: process.env.FIREBASE_WEB_API_KEY || '',
+    firestoreDatabaseId: process.env.FIREBASE_DATABASE_ID || '(default)'
+  };
+}
+
+const firebaseConfig = loadFirebaseConfig();
+
+// Optional Firebase Admin SDK initialization (enabled when FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS is valid)
+let adminAuth: Auth | null = null;
+let adminDb: Firestore | null = null;
+let adminSdkIssue: string | null = null;
+
+type ParsedServiceAccount = ServiceAccount & {
+  project_id?: string;
+  private_key?: string;
+  client_email?: string;
+};
+
+function parseServiceAccountInput(rawInput: string): ParsedServiceAccount | null {
+  let candidate = rawInput.trim();
+  if (
+    (candidate.startsWith('"') && candidate.endsWith('"')) ||
+    (candidate.startsWith("'") && candidate.endsWith("'"))
+  ) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+  if (!candidate) return null;
+
+  let jsonText = '';
+  if (candidate.startsWith('{')) {
+    jsonText = candidate;
+  } else if (candidate.endsWith('.json') && fs.existsSync(candidate)) {
+    try {
+      jsonText = fs.readFileSync(candidate, 'utf8').trim();
+    } catch {
+      return null;
+    }
+  } else {
+    try {
+      const decoded = Buffer.from(candidate, 'base64').toString('utf8').trim();
+      if (decoded.startsWith('{')) {
+        jsonText = decoded;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  if (!jsonText.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(jsonText) as ParsedServiceAccount;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const clientEmail = parsed.clientEmail || parsed.client_email;
+    const rawPrivateKey = parsed.privateKey || parsed.private_key;
+    if (typeof clientEmail !== 'string' || !clientEmail.includes('@')) return null;
+    if (typeof rawPrivateKey !== 'string' || !rawPrivateKey.includes('PRIVATE KEY')) return null;
+    const normalizedKey = rawPrivateKey.replace(/\\n/g, '\n');
+    return {
+      ...parsed,
+      client_email: clientEmail,
+      clientEmail,
+      private_key: normalizedKey,
+      privateKey: normalizedKey
+    };
+  } catch {
+    return null;
+  }
+}
+
+function initFirebaseAdmin(): void {
+  const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  const credsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+  if (!rawJson && !credsPath) return;
+
+  try {
+    let appInstance: App;
+    if (getApps().length > 0) {
+      appInstance = getApp();
+    } else if (rawJson) {
+      const serviceAccount = parseServiceAccountInput(rawJson);
+      if (!serviceAccount) {
+        adminSdkIssue =
+          'FIREBASE_SERVICE_ACCOUNT_JSON is not a valid Firebase service account JSON key.';
+        return;
+      }
+      appInstance = initializeApp({
+        credential: cert(serviceAccount),
+        projectId: firebaseConfig.projectId || serviceAccount.projectId || serviceAccount.project_id
+      });
+    } else {
+      appInstance = initializeApp({
+        credential: applicationDefault(),
+        projectId: firebaseConfig.projectId || undefined
+      });
+    }
+    adminAuth = getAuth(appInstance);
+    adminDb = firebaseConfig.firestoreDatabaseId
+      ? getAdminFirestore(appInstance, firebaseConfig.firestoreDatabaseId)
+      : getAdminFirestore(appInstance);
+    adminSdkIssue = null;
+  } catch (err) {
+    adminSdkIssue = err instanceof Error ? err.message : String(err);
+    adminAuth = null;
+    adminDb = null;
+  }
+}
+
+initFirebaseAdmin();
+
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+const MAX_ASSISTANT_QUESTION_CHARS = 300;
 
-app.use(express.json());
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '32kb' }));
 
 const apiKey = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-4-hydrogen';
@@ -23,70 +170,361 @@ if (apiKey) {
     apiKey,
     httpOptions: {
       headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
+        'User-Agent': 'aistudio-build'
+      }
+    }
   });
 }
 
-// AI Village Assistant Endpoint (Egyptian Arabic & English)
-app.post('/api/village-assistant', async (req: Request, res: Response) => {
-  const { question, language, villageName } = req.body || {};
-  if (!question) {
-    res.status(400).json({ error: 'Question is required' });
+interface VerifiedAuthUser {
+  uid: string;
+  email?: string;
+  phoneNumber?: string;
+}
+
+interface AuthenticatedRequest extends Request {
+  authUser?: VerifiedAuthUser;
+}
+
+async function verifyIdTokenFallback(idToken: string): Promise<VerifiedAuthUser | null> {
+  if (!firebaseConfig.apiKey) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const resp = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(firebaseConfig.apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+        signal: controller.signal
+      }
+    );
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as {
+      users?: Array<{
+        localId?: string;
+        email?: string;
+        phoneNumber?: string;
+        disabled?: boolean;
+      }>;
+    };
+    const u = data.users?.[0];
+    if (!u?.localId || u.disabled) return null;
+    return {
+      uid: u.localId,
+      email: u.email,
+      phoneNumber: u.phoneNumber
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function isUidOrPhoneBannedInAdminDb(uid: string, phoneNumber?: string): Promise<boolean> {
+  if (!adminDb) return false;
+  const now = Date.now();
+  try {
+    const userSnap = await adminDb.collection('users').doc(uid).get();
+    if (userSnap.exists) {
+      const data = userSnap.data() as { isBanned?: boolean; banUntilMs?: number } | undefined;
+      if (data?.isBanned && (!data.banUntilMs || data.banUntilMs <= 0 || now < data.banUntilMs)) {
+        return true;
+      }
+    }
+    if (phoneNumber) {
+      const digits = phoneNumber.replace(/\D/g, '');
+      const normalized = digits.startsWith('20') && digits.length === 12 ? digits.slice(1) : digits;
+      if (normalized.length >= 8) {
+        const banSnap = await adminDb.collection('bannedPhones').doc(normalized).get();
+        if (banSnap.exists) {
+          const ban = banSnap.data() as { isPermanent?: boolean; banUntilMs?: number } | undefined;
+          if (ban?.isPermanent || (ban?.banUntilMs && now < ban.banUntilMs)) {
+            return true;
+          }
+        }
+      }
+    }
+  } catch {
+    // Do not break assistant if Firestore lookup fails transiently
+  }
+  return false;
+}
+
+async function requireFirebaseAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const authHeader = req.headers.authorization || '';
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  const idToken = match?.[1]?.trim();
+
+  if (!idToken || idToken.length > 4096) {
+    res.status(401).json({ error: 'Authentication required' });
     return;
   }
 
-  const isArabic = language === 'ar' || /[\u0600-\u06FF]/.test(question);
-  const vName = villageName || (isArabic ? 'قرية نقباس' : 'Noqbas Village');
+  let verified: VerifiedAuthUser;
+  if (adminAuth) {
+    try {
+      const decoded = await adminAuth.verifyIdToken(idToken, true);
+      verified = {
+        uid: decoded.uid,
+        email: decoded.email,
+        phoneNumber: decoded.phone_number
+      };
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired authentication token' });
+      return;
+    }
+  } else {
+    const fallbackUser = await verifyIdTokenFallback(idToken);
+    if (!fallbackUser) {
+      res.status(401).json({ error: 'Invalid or expired authentication token' });
+      return;
+    }
+    verified = fallbackUser;
+  }
 
-  const fallbackReply = isArabic
-    ? `أهلاً بيك يا جاري العزيز في منصة ${vName}! تقدر تحجز كشف في قسم أطباء وعيادات، تطلب دواء من الصيدليات، أو أكل من مطاعم وكافيهات، أو مقاضي البيت من بقالة وسوبر ماركت، وكمان تحجز مواصلات أو دروس ومعلمون أو تتواصل مع الجمعيات الخيرية أو تشوف قسم أخرى. اختار القسم اللي محتاجه من فوق!`
-    : `Welcome, neighbor to ${vName}! You can book Doctors & Clinics, order from Pharmacies, Restaurants & Cafes, Grocery & Supermarket, find Technicians, book Rides, Tutoring, Charities, or browse Other services from the navigation menu!`;
+  const banned = await isUidOrPhoneBannedInAdminDb(verified.uid, verified.phoneNumber);
+  if (banned) {
+    res.status(403).json({ error: 'Account is currently banned' });
+    return;
+  }
 
-  if (!aiClient) {
-    res.json({ answer: fallbackReply });
+  req.authUser = verified;
+  next();
+}
+
+const assistantLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many assistant requests, please wait before trying again.' }
+});
+
+const banCheckLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many verification checks, please wait.' }
+});
+
+const adminActionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many admin requests, please slow down.' }
+});
+
+// AI Village Assistant Endpoint (Authenticated + Rate-limited + Max 300 chars)
+app.post(
+  '/api/village-assistant',
+  assistantLimiter,
+  requireFirebaseAuth,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const rawQuestion = req.body?.question;
+    const language = req.body?.language;
+    const villageName = typeof req.body?.villageName === 'string' ? req.body.villageName.trim().slice(0, 80) : '';
+
+    if (typeof rawQuestion !== 'string') {
+      res.status(400).json({ error: 'Question must be a non-empty string' });
+      return;
+    }
+
+    const cleanQuestion = rawQuestion.trim();
+    if (!cleanQuestion) {
+      res.status(400).json({ error: 'Question is required' });
+      return;
+    }
+    if (cleanQuestion.length > MAX_ASSISTANT_QUESTION_CHARS) {
+      res.status(400).json({
+        error: `Question exceeds maximum length of ${MAX_ASSISTANT_QUESTION_CHARS} characters`
+      });
+      return;
+    }
+
+    const isArabic = language === 'ar' || /[\u0600-\u06FF]/.test(cleanQuestion);
+    const vName = villageName || (isArabic ? 'قرية نقباس' : 'Noqbas Village');
+
+    const fallbackReply = isArabic
+      ? `أهلاً بيك يا جاري العزيز في منصة ${vName}! تقدر تتصفح أقسام أطباء وعيادات، صيدليات، مطاعم وكافيهات، بقالة وسوبر ماركت، فنيين وحرفيين، مواصلات، دروس ومعلمون، الجمعيات الخيرية أو قسم أخرى وتختار مقدم الخدمة المعتمد الأقرب ليك من القائمة.`
+      : `Welcome to ${vName}! You can browse Doctors & Clinics, Pharmacies, Restaurants & Cafes, Grocery & Supermarket, Technicians, Rides, Tutoring, Charities, or Other Services directly from the category tabs to choose an approved local provider.`;
+
+    if (!aiClient) {
+      res.json({ answer: fallbackReply });
+      return;
+    }
+
+    try {
+      const prompt = `You are "Emad" (عماد), a friendly, respectful, and practical village assistant for the Egyptian digital community hub "${vName}" (نقباس | Noqbas).
+The resident is asking: "${cleanQuestion}"
+Preferred language: ${isArabic ? 'Egyptian Colloquial Arabic (عامية مصرية محترمة وبسيطة مفهومة لكل أهل البلد)' : 'English (warm, community-focused, and helpful)'}.
+Currency: Egyptian Pound (EGP / ج.م).
+Important rules:
+- Do NOT invent specific doctor names, technician names, phone numbers, or prices that are not provided by the user.
+- Guide the resident to the matching category tab in the platform so they can browse currently registered and approved local providers, check open/closed availability, and place their booking or order safely.
+
+Platform categories available:
+1. أطباء وعيادات (Doctors & Clinics): Clinic visits, consultations, and home nursing appointments.
+2. صيدليات (Pharmacies): Medication orders, health supplies, and prescription uploads with delivery or pickup.
+3. مطاعم وكافيهات (Restaurants & Cafes): Local meals, bakeries, grills, and village kitchens.
+4. فنيون وحرفيون (Technicians & Craftsmen): Electricians, plumbers, HVAC, carpentry, and home maintenance.
+5. مواصلات (Transportation & Rides): Local rides and inter-village commutes.
+6. بقالة وسوبر ماركت (Grocery & Supermarket): Daily pantry staples, dairy, and fresh produce.
+7. دروس ومعلمون (Tutoring & Teachers): Academic tutoring and study circles.
+8. الجمعيات الخيرية (Charities): Community aid, medical convoys, and charitable support.
+9. أخرى (Other Services): Printing, electronics repair, laundry, and miscellaneous village services.
+10. إعلانات أهل القرية (Classified Ads): Approved neighborhood offers and listings on the Home tab.
+
+Give a concise, helpful response (2-3 short sentences) in ${isArabic ? 'Egyptian Colloquial Arabic' : 'English'} guiding them to the right section.`;
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini request timeout')), 12000)
+      );
+
+      const response = await Promise.race([
+        aiClient.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: prompt
+        }),
+        timeoutPromise
+      ]);
+
+      res.json({ answer: response.text || fallbackReply });
+    } catch (error) {
+      console.error('Village assistant error:', error);
+      res.json({ answer: fallbackReply });
+    }
+  }
+);
+
+// Pre-SMS / Pre-Auth phone ban check (active when Firebase Admin SDK is configured)
+app.post('/api/auth/check-ban', banCheckLimiter, async (req: Request, res: Response) => {
+  const rawPhone = typeof req.body?.phone === 'string' ? req.body.phone : '';
+  const digits = rawPhone.replace(/\D/g, '');
+  const normalized =
+    digits.startsWith('20') && digits.length === 12
+      ? digits.slice(1)
+      : digits.startsWith('0020') && digits.length === 14
+      ? digits.slice(3)
+      : digits;
+
+  if (normalized.length < 8 || normalized.length > 20) {
+    res.status(400).json({ error: 'Invalid phone number' });
+    return;
+  }
+
+  if (!adminDb) {
+    res.json({ configured: false, banned: false });
     return;
   }
 
   try {
-    const prompt = `You are "Emad" (عماد), a friendly, respectful, and practical village assistant for the Egyptian digital community hub "${vName}" (نقباس | Noqbas).
-The user is asking: "${question}"
-Preferred language: ${isArabic ? 'Egyptian Colloquial Arabic (عامية مصرية محترمة وبسيطة مفهومة لكل أهل البلد)' : 'English (warm, community-focused, and helpful)'}.
-Currency: Egyptian Pound (EGP / ج.م).
-
-Village sections available in the app:
-1. أطباء وعيادات (Doctors & Clinics): Dr. Tariq Al-Khatib (Internal Medicine, 100 EGP), Dr. Laila Mansour (Pediatrician, 150 EGP), Nurse Fatima (Home nursing/injections 24/7, 50 EGP).
-2. صيدليات (Pharmacies): Al-Shifa Pharmacy (prescription photo upload, chronic meds, distance-based delivery or free pickup).
-3. مطاعم وكافيهات (Restaurants & Cafes): Al-Baraka Bakery (Feteer Meshaltet 140 EGP), Um Salem Homemade Kitchen (Duck & Mahshi trays 420 EGP), Al-Wadi Grill & Cafe.
-4. فنيون وحرفيون (Technicians): Abu Ahmad (Electrician, 01045678901, 80 EGP), Master Mahmoud (Plumber & water pumps, 01156789012, 70 EGP), Eng. Youssef (AC & Fridges, 120 EGP).
-5. مواصلات (Transportation & Rides): Daily carpools and rides from Village Square (25-30 EGP).
-6. بقالة وسوبر ماركت (Grocery & Supermarket): Daily pantry staples, cooking oil, rice, dairy, and fresh produce delivered to the house.
-7. دروس ومعلمون (Tutoring & Teachers): Math, English, Science, and Quran circles for primary/prep/secondary students.
-8. الجمعيات الخيرية (Charities): Community aid, medical convoys, food boxes, and confidential charitable support.
-9. أخرى (Other Services): Print shops, stationery, mobile repair, carpet laundry, wedding event tents, and any activity not listed above.
-10. إعلانات أهل القرية (Classified Ads): Timed approved resident/shop offers displayed on the Home tab.
-
-Give a concise, helpful response (2-3 short sentences) in ${isArabic ? 'Egyptian Colloquial Arabic' : 'English'} guiding them directly to the right section or provider.`;
-
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Gemini request timeout')), 12000)
-    );
-
-    const response = await Promise.race([
-      aiClient.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: prompt,
-      }),
-      timeoutPromise,
-    ]);
-
-    res.json({ answer: response.text || fallbackReply });
-  } catch (error) {
-    console.error('Village assistant error:', error);
-    res.json({ answer: fallbackReply });
+    const snap = await adminDb.collection('bannedPhones').doc(normalized).get();
+    if (!snap.exists) {
+      res.json({ configured: true, banned: false });
+      return;
+    }
+    const ban = snap.data() as {
+      isPermanent?: boolean;
+      banUntilMs?: number;
+      reason?: string;
+    };
+    const now = Date.now();
+    const active = Boolean(ban.isPermanent) || Boolean(ban.banUntilMs && now < ban.banUntilMs);
+    res.json({
+      configured: true,
+      banned: active,
+      isPermanent: Boolean(ban.isPermanent),
+      banUntilMs: ban.banUntilMs || 0,
+      reason: active ? ban.reason || '' : ''
+    });
+  } catch (err) {
+    console.warn('Pre-auth ban lookup warning:', err);
+    res.json({ configured: true, banned: false });
   }
 });
+
+// Full Account Deletion via Firebase Admin SDK (deletes Auth account + Firestore user/provider/cart docs)
+app.post(
+  '/api/admin/delete-user',
+  adminActionLimiter,
+  requireFirebaseAuth,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const targetUid = typeof req.body?.uid === 'string' ? req.body.uid.trim() : '';
+    if (!targetUid || !/^[a-zA-Z0-9_-]{1,128}$/.test(targetUid)) {
+      res.status(400).json({ ok: false, error: 'Valid target user uid is required' });
+      return;
+    }
+
+    if (req.authUser?.uid === targetUid) {
+      res.status(400).json({ ok: false, error: 'Cannot delete the active admin account' });
+      return;
+    }
+
+    if (!adminAuth || !adminDb) {
+      res.status(501).json({
+        ok: false,
+        authDeleted: false,
+        reason: 'ADMIN_SDK_UNCONFIGURED',
+        error: adminSdkIssue || 'Firebase Admin SDK is not configured on the server.'
+      });
+      return;
+    }
+
+    try {
+      const callerAdminSnap = await adminDb
+        .collection('admins')
+        .doc(req.authUser!.uid)
+        .get();
+      if (!callerAdminSnap.exists) {
+        res.status(403).json({ ok: false, error: 'Admin privileges required' });
+        return;
+      }
+
+      const targetAdminSnap = await adminDb.collection('admins').doc(targetUid).get();
+      if (targetAdminSnap.exists) {
+        res.status(400).json({ ok: false, error: 'Cannot delete an admin account' });
+        return;
+      }
+
+      let authDeleted = false;
+      try {
+        await adminAuth.deleteUser(targetUid);
+        authDeleted = true;
+      } catch (err) {
+        const code = (err as { code?: string })?.code || '';
+        if (code === 'auth/user-not-found') {
+          authDeleted = true;
+        } else {
+          throw err;
+        }
+      }
+
+      await Promise.allSettled([
+        adminDb.collection('users').doc(targetUid).delete(),
+        adminDb.collection('providers').doc(targetUid).delete(),
+        adminDb.collection('carts').doc(targetUid).delete()
+      ]);
+
+      res.json({ ok: true, authDeleted });
+    } catch (err) {
+      console.error('Admin delete user error:', err);
+      res.status(500).json({
+        ok: false,
+        authDeleted: false,
+        error: 'Failed to delete user account on server'
+      });
+    }
+  }
+);
 
 // Setup Vite or static serving
 async function startServer() {
@@ -96,7 +534,7 @@ async function startServer() {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'spa'
     });
     app.use(vite.middlewares);
   } else {

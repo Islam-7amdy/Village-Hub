@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import {
   collection,
+  deleteField,
   doc,
   onSnapshot,
   query,
@@ -22,7 +23,6 @@ import {
   PaymentStatus,
   PendingPaymentOrder,
   ProviderListing,
-  TEST_DEMO_BOOKINGS,
   UserProfile,
   VillageAd,
   VillageConfig,
@@ -30,6 +30,7 @@ import {
   getServiceStatusLabel,
   normalizePhone
 } from '../data/villageData';
+import { TEST_DEMO_BOOKINGS } from '../data/demoSeedData';
 import { TRANSLATIONS } from '../data/translations';
 import { CartItem } from '../components/Modals/CartModal';
 import { AppNotificationItem } from '../components/Modals/NotificationsModal';
@@ -83,7 +84,9 @@ export function useBookings({
 }: UseBookingsOptions) {
   const t = TRANSLATIONS[lang];
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [bookings, setBookings] = useState<BookingRequest[]>(TEST_DEMO_BOOKINGS);
+  const [bookings, setBookings] = useState<BookingRequest[]>(
+    import.meta.env.DEV ? TEST_DEMO_BOOKINGS : []
+  );
   const [seenNotificationIds, setSeenNotificationIds] = useState<string[]>([]);
   const [pendingPayment, setPendingPayment] = useState<PendingPaymentOrder | null>(null);
   const [recentlyCompletedOrderId, setRecentlyCompletedOrderId] = useState<string | null>(null);
@@ -127,7 +130,7 @@ export function useBookings({
   // 2. Bookings & Notifications Seen State Listener
   useEffect(() => {
     if (!effectiveUid) {
-      setBookings(TEST_DEMO_BOOKINGS);
+      setBookings(import.meta.env.DEV ? TEST_DEMO_BOOKINGS : []);
       setSeenNotificationIds([]);
       return;
     }
@@ -145,7 +148,11 @@ export function useBookings({
     }
 
     if (!firebaseUser) {
-      setBookings((prev) => (prev.length > 0 ? prev : TEST_DEMO_BOOKINGS));
+      if (import.meta.env.DEV) {
+        setBookings((prev) => (prev.length > 0 ? prev : TEST_DEMO_BOOKINGS));
+      } else {
+        setBookings([]);
+      }
       return;
     }
 
@@ -153,7 +160,6 @@ export function useBookings({
       const unsub = onSnapshot(
         collection(db, 'bookings'),
         (snap) => {
-          if (snap.empty) return;
           const remote: BookingRequest[] = snap.docs.map((d) => {
             const data = d.data() as BookingRequest;
             return {
@@ -165,14 +171,7 @@ export function useBookings({
                   : new Date().toLocaleDateString()
             };
           });
-          setBookings((prev) => {
-            const map = new Map<string, BookingRequest>();
-            remote.forEach((b) => map.set(b.id, b));
-            prev.forEach((b) => {
-              if (!map.has(b.id)) map.set(b.id, b);
-            });
-            return Array.from(map.values());
-          });
+          setBookings(remote);
         },
         (err) => console.warn('Bookings listener warning:', err.message)
       );
@@ -183,16 +182,10 @@ export function useBookings({
     let providerRemote: BookingRequest[] = [];
 
     const syncCustomerAndProviderBookings = () => {
-      if (ownerRemote.length === 0 && providerRemote.length === 0) return;
-      setBookings((prev) => {
-        const map = new Map<string, BookingRequest>();
-        ownerRemote.forEach((b) => map.set(b.id, b));
-        providerRemote.forEach((b) => map.set(b.id, b));
-        prev.forEach((b) => {
-          if (!map.has(b.id)) map.set(b.id, b);
-        });
-        return Array.from(map.values());
-      });
+      const map = new Map<string, BookingRequest>();
+      ownerRemote.forEach((b) => map.set(b.id, b));
+      providerRemote.forEach((b) => map.set(b.id, b));
+      setBookings(Array.from(map.values()));
     };
 
     const mapSnapshotDocs = (docs: { id: string; data: () => unknown }[]): BookingRequest[] =>
@@ -545,76 +538,91 @@ export function useBookings({
   const persistBooking = useCallback(
     async (booking: BookingRequest): Promise<void> => {
       setBookingError('');
-      const providerVisible =
-        typeof booking.providerVisible === 'boolean'
-          ? booking.providerVisible
-          : booking.paymentMethod !== 'instapay';
+      const paymentMethod: PaymentMethod = booking.paymentMethod === 'instapay' ? 'instapay' : 'cod';
+      const paymentStatus: PaymentStatus =
+        paymentMethod === 'instapay' ? 'pending_verification' : 'pending_cod';
+      const providerVisible = paymentMethod === 'cod';
+      const deliveryFeeEgp =
+        typeof booking.deliveryFeeEgp === 'number' && Number.isFinite(booking.deliveryFeeEgp)
+          ? Math.max(0, Number(booking.deliveryFeeEgp))
+          : 0;
+      const codFeeEgp = paymentMethod === 'cod' ? 10 : 0;
+      const subtotalEgp =
+        typeof booking.subtotalEgp === 'number' && Number.isFinite(booking.subtotalEgp) && booking.subtotalEgp > 0
+          ? Number(booking.subtotalEgp)
+          : Math.max(
+              1,
+              Number(booking.totalAmountEgp ?? 0) - deliveryFeeEgp - codFeeEgp
+            );
+      const totalAmountEgp = Number((subtotalEgp + deliveryFeeEgp + codFeeEgp).toFixed(2));
       const resolvedVillageId = booking.villageId || activeVillage.id;
-      const withOwner: BookingRequest = effectiveUid
-        ? {
-            ...booking,
-            villageId: resolvedVillageId,
-            ownerId: booking.ownerId || effectiveUid,
-            providerVisible,
-            settlementStatus: booking.settlementStatus || 'pending'
-          }
-        : {
-            ...booking,
-            villageId: resolvedVillageId,
-            providerVisible,
-            settlementStatus: booking.settlementStatus || 'pending'
-          };
 
-      setBookings((prev) => [withOwner, ...prev]);
+      const normalizedBooking: BookingRequest = {
+        ...booking,
+        villageId: resolvedVillageId,
+        ownerId: booking.ownerId || effectiveUid || undefined,
+        status: 'pending',
+        paymentMethod,
+        paymentStatus,
+        providerVisible,
+        settlementStatus: 'pending',
+        subtotalEgp,
+        deliveryFeeEgp,
+        codFeeEgp,
+        totalAmountEgp
+      };
+
+      setBookings((prev) => [normalizedBooking, ...prev]);
 
       if (firebaseUser) {
         try {
           const payload: Record<string, unknown> = {
             ownerId: firebaseUser.uid,
             villageId: resolvedVillageId,
-            serviceType: booking.serviceType,
-            title: booking.title.slice(0, 160),
-            providerName: booking.providerName.slice(0, 100),
-            customerName: booking.customerName.slice(0, 80),
-            customerPhone: booking.customerPhone.slice(0, 30),
-            status: booking.status,
+            serviceType: normalizedBooking.serviceType,
+            title: normalizedBooking.title.slice(0, 160),
+            providerName: normalizedBooking.providerName.slice(0, 100),
+            customerName: normalizedBooking.customerName.slice(0, 80),
+            customerPhone: normalizedBooking.customerPhone.slice(0, 30),
+            status: 'pending',
+            paymentMethod,
+            paymentStatus,
             providerVisible,
-            settlementStatus: booking.settlementStatus || 'pending',
+            settlementStatus: 'pending',
+            subtotalEgp,
+            deliveryFeeEgp,
+            codFeeEgp,
+            totalAmountEgp,
             createdAt: serverTimestamp()
           };
-          if (booking.providerOwnerId) payload.providerOwnerId = booking.providerOwnerId.slice(0, 128);
-          if (booking.address) payload.address = booking.address.slice(0, 160);
-          if (typeof booking.distanceKm === 'number') payload.distanceKm = booking.distanceKm;
-          if (typeof booking.deliveryFeeEgp === 'number') payload.deliveryFeeEgp = booking.deliveryFeeEgp;
-          if (typeof booking.codFeeEgp === 'number') payload.codFeeEgp = booking.codFeeEgp;
-          if (typeof booking.subtotalEgp === 'number') payload.subtotalEgp = booking.subtotalEgp;
-          if (typeof booking.totalAmountEgp === 'number') payload.totalAmountEgp = booking.totalAmountEgp;
-          if (booking.date) payload.date = booking.date.slice(0, 40);
-          if (booking.time) payload.time = booking.time.slice(0, 40);
-          if (booking.notes) payload.notes = booking.notes.slice(0, 400);
-          if (booking.itemsSummary) payload.itemsSummary = booking.itemsSummary.slice(0, 400);
-          if (booking.paymentMethod) payload.paymentMethod = booking.paymentMethod;
-          if (booking.paymentStatus) payload.paymentStatus = booking.paymentStatus;
-          if (booking.transactionRef) payload.transactionRef = booking.transactionRef.slice(0, 60);
-          if (booking.instaPaySender) payload.instaPaySender = booking.instaPaySender.slice(0, 60);
-          if (booking.instaPayCustomerRef) {
-            payload.instaPayCustomerRef = booking.instaPayCustomerRef.slice(0, 60);
+          if (normalizedBooking.providerOwnerId) {
+            payload.providerOwnerId = normalizedBooking.providerOwnerId.slice(0, 128);
           }
-          if (booking.paymentVerifiedAt) {
-            payload.paymentVerifiedAt = booking.paymentVerifiedAt.slice(0, 40);
+          if (normalizedBooking.address) payload.address = normalizedBooking.address.slice(0, 160);
+          if (typeof normalizedBooking.distanceKm === 'number') {
+            payload.distanceKm = normalizedBooking.distanceKm;
           }
-          if (booking.deliveryConfirmedRef) {
-            payload.deliveryConfirmedRef = booking.deliveryConfirmedRef.slice(0, 60);
+          if (normalizedBooking.date) payload.date = normalizedBooking.date.slice(0, 40);
+          if (normalizedBooking.time) payload.time = normalizedBooking.time.slice(0, 40);
+          if (normalizedBooking.notes) payload.notes = normalizedBooking.notes.slice(0, 400);
+          if (normalizedBooking.itemsSummary) {
+            payload.itemsSummary = normalizedBooking.itemsSummary.slice(0, 400);
           }
-          if (booking.deliveryConfirmedAt) {
-            payload.deliveryConfirmedAt = booking.deliveryConfirmedAt.slice(0, 40);
+          if (normalizedBooking.transactionRef) {
+            payload.transactionRef = normalizedBooking.transactionRef.slice(0, 60);
+          }
+          if (paymentMethod === 'instapay' && normalizedBooking.instaPaySender) {
+            payload.instaPaySender = normalizedBooking.instaPaySender.slice(0, 60);
+          }
+          if (paymentMethod === 'instapay' && normalizedBooking.instaPayCustomerRef) {
+            payload.instaPayCustomerRef = normalizedBooking.instaPayCustomerRef.slice(0, 60);
           }
 
-          await setDoc(doc(db, 'bookings', booking.id), payload);
+          await setDoc(doc(db, 'bookings', normalizedBooking.id), payload);
         } catch (err) {
-          setBookings((prev) => prev.filter((b) => b.id !== withOwner.id));
+          setBookings((prev) => prev.filter((b) => b.id !== normalizedBooking.id));
           try {
-            handleFirestoreError(err, OperationType.CREATE, `bookings/${booking.id}`);
+            handleFirestoreError(err, OperationType.CREATE, `bookings/${normalizedBooking.id}`);
           } catch {
             // Diagnostic logged via handleFirestoreError
           }
@@ -743,7 +751,7 @@ export function useBookings({
       if (firebaseUser && !orderId.startsWith('book-demo-')) {
         try {
           await updateDoc(doc(db, 'bookings', orderId), {
-            providerOwnerId: providerOwnerId || '',
+            providerOwnerId: providerOwnerId ? providerOwnerId.slice(0, 128) : deleteField(),
             providerName: providerName.slice(0, 100)
           });
         } catch (err) {

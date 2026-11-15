@@ -7,7 +7,7 @@ import {
   deleteDoc,
   serverTimestamp
 } from 'firebase/firestore';
-import { db, ADMIN_EMAIL, handleFirestoreError, OperationType } from '../firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import {
   Language,
   UserProfile,
@@ -100,6 +100,8 @@ interface AdminWorkspaceProps {
   onToggleDarkMode: () => void;
   activeVillage: VillageConfig;
   adminProfile: UserProfile | null;
+  currentAdminUid?: string | null;
+  adminUids?: string[];
   providers: ProviderListing[];
   ads: VillageAd[];
   users: UserProfile[];
@@ -194,6 +196,8 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
   onToggleDarkMode,
   activeVillage,
   adminProfile,
+  currentAdminUid,
+  adminUids,
   providers,
   ads,
   users,
@@ -912,8 +916,11 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
     }
   };
 
+  const isProtectedAdminUid = (uid: string) =>
+    Boolean(uid && (uid === currentAdminUid || adminUids?.includes(uid)));
+
   const handleBanUser = async (user: UserProfile) => {
-    if (user.email === ADMIN_EMAIL) return;
+    if (isProtectedAdminUid(user.uid)) return;
     const normalized = normalizePhone(user.phone);
     if (!normalized || normalized.length < 8) {
       showToast(lang === 'ar' ? 'المستخدم لا يملك رقم هاتف صالح' : 'Invalid user phone number');
@@ -998,7 +1005,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
   };
 
   const handleDeleteUser = async (user: UserProfile) => {
-    if (user.email === ADMIN_EMAIL) return;
+    if (isProtectedAdminUid(user.uid)) return;
     setBusyId(`del-${user.uid}`);
     try {
       if (user.uid.startsWith('test-')) {
@@ -1007,23 +1014,77 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
         showToast(lang === 'ar' ? `تم حذف ${user.displayName}` : `Deleted ${user.displayName}`);
         return;
       }
-      try {
-        await deleteDoc(doc(db, 'users', user.uid));
-      } catch (err) {
-        handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}`);
+
+      let serverAuthDeleted = false;
+      let serverUnconfigured = false;
+
+      const idToken = await auth.currentUser?.getIdToken().catch(() => null);
+      if (idToken) {
+        try {
+          const res = await fetch('/api/admin/delete-user', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${idToken}`
+            },
+            body: JSON.stringify({ uid: user.uid })
+          });
+          if (res.ok) {
+            serverAuthDeleted = true;
+          } else {
+            const payload = (await res.json().catch(() => ({}))) as {
+              reason?: string;
+              error?: string;
+            };
+            if (res.status === 501 && payload.reason === 'ADMIN_SDK_UNCONFIGURED') {
+              serverUnconfigured = true;
+            } else {
+              showToast(
+                payload.error ||
+                  (lang === 'ar' ? 'تعذر حذف المستخدم من الخادم' : 'Server user deletion failed')
+              );
+              return;
+            }
+          }
+        } catch {
+          serverUnconfigured = true;
+        }
+      } else {
+        serverUnconfigured = true;
       }
-      try {
-        await deleteDoc(doc(db, 'providers', user.uid));
-      } catch {
-        // Ignore
+
+      if (!serverAuthDeleted) {
+        try {
+          await deleteDoc(doc(db, 'users', user.uid));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}`);
+        }
+        try {
+          await deleteDoc(doc(db, 'providers', user.uid));
+        } catch {
+          // Ignore if doc absent
+        }
+        try {
+          await deleteDoc(doc(db, 'carts', user.uid));
+        } catch {
+          // Ignore if doc absent
+        }
       }
-      try {
-        await deleteDoc(doc(db, 'carts', user.uid));
-      } catch {
-        // Ignore
-      }
+
       setConfirmDeleteUid(null);
-      showToast(lang === 'ar' ? `تم حذف حساب ${user.displayName}` : `Deleted ${user.displayName}`);
+      if (serverAuthDeleted) {
+        showToast(
+          lang === 'ar'
+            ? `تم حذف حساب ${user.displayName} بالكامل (Auth + Firestore) ✓`
+            : `Permanently deleted ${user.displayName} (Auth + Firestore) ✓`
+        );
+      } else if (serverUnconfigured) {
+        showToast(
+          lang === 'ar'
+            ? `تم حذف بيانات Firestore لـ ${user.displayName} فقط (حذف Auth يتطلب Firebase Admin SDK)`
+            : `Deleted Firestore docs for ${user.displayName} only (Auth requires Firebase Admin SDK)`
+        );
+      }
     } finally {
       setBusyId(null);
     }
@@ -1186,7 +1247,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
               </span>
             </div>
             <div className="text-[11px] text-slate-500 truncate font-mono tabular-nums">
-              {ADMIN_EMAIL}
+              {adminProfile?.displayName || (lang === 'ar' ? 'مدير المنصة المعتمد' : 'Verified Platform Admin')}
             </div>
           </div>
         </div>
@@ -2665,7 +2726,16 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                             <select
                               value={b.providerOwnerId || ''}
                               onChange={(e) => {
-                                const found = providers.find((p) => p.ownerId === e.target.value);
+                                const val = e.target.value;
+                                if (!val) {
+                                  onAssignOrderProvider(
+                                    b.id,
+                                    '',
+                                    lang === 'ar' ? 'غير محدد' : 'Unassigned'
+                                  );
+                                  return;
+                                }
+                                const found = providers.find((p) => p.ownerId === val);
                                 if (found) {
                                   onAssignOrderProvider(
                                     b.id,
@@ -2676,7 +2746,11 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                               }}
                               className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px]"
                             >
-                              <option value="">{b.providerName}</option>
+                              <option value="">
+                                {lang === 'ar'
+                                  ? `${b.providerName || 'غير محدد'} (إلغاء التعيين)`
+                                  : `${b.providerName || 'Unassigned'} (Unassign)`}
+                              </option>
                               {providers.map((p) => (
                                 <option key={p.id} value={p.ownerId}>
                                   {lang === 'ar' ? p.nameAr : p.nameEn}
@@ -2871,7 +2945,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
               <div className="space-y-3">
                 {filteredUsers.map((row) => {
                   const u = row.user;
-                  const isSelfAdmin = u.email === ADMIN_EMAIL;
+                  const isSelfAdmin = isProtectedAdminUid(u.uid);
                   return (
                     <div
                       key={u.uid}

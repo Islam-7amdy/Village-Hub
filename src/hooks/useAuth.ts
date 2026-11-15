@@ -1,16 +1,16 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
-import { auth, db, ADMIN_EMAIL } from '../firebase';
+import { auth, db } from '../firebase';
 import {
   BannedPhoneRecord,
   DemoTestAccount,
   DemoUserAdminAction,
-  TEST_DEMO_ACCOUNTS,
   UserProfile,
   isBanCurrentlyActive,
   normalizePhone
 } from '../data/villageData';
+import { TEST_DEMO_ACCOUNTS } from '../data/demoSeedData';
 
 export interface UseAuthOptions {
   nowMs: number;
@@ -25,12 +25,12 @@ export function useAuth({ nowMs, isAuthModalOpen, onPromptCompleteProfile }: Use
   const [ownPhoneBan, setOwnPhoneBan] = useState<BannedPhoneRecord | null>(null);
   const promptedPhoneForUidRef = useRef<string | null>(null);
 
-  const isAdmin = Boolean(
-    firebaseUser?.email === ADMIN_EMAIL && firebaseUser?.emailVerified
-  );
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [adminUids, setAdminUids] = useState<string[]>([]);
 
-  // Demo Test Accounts Session State
+  // Demo Test Accounts Session State (DEV only)
   const [demoUid, setDemoUid] = useState<string | null>(() => {
+    if (!import.meta.env.DEV) return null;
     try {
       return window.localStorage.getItem('noqbas_demo_uid');
     } catch {
@@ -67,8 +67,28 @@ export function useAuth({ nowMs, isAuthModalOpen, onPromptCompleteProfile }: Use
     return () => unsub();
   }, []);
 
+  // 1b. Admin Role Listener (via Firestore /admins/{uid} collection)
+  useEffect(() => {
+    if (!firebaseUser) {
+      setIsAdmin(false);
+      return;
+    }
+    const unsub = onSnapshot(
+      doc(db, 'admins', firebaseUser.uid),
+      (snap) => {
+        setIsAdmin(snap.exists());
+      },
+      () => {
+        setIsAdmin(false);
+      }
+    );
+    return () => unsub();
+  }, [firebaseUser]);
+
   const activeDemoAccount = useMemo<DemoTestAccount | null>(() => {
-    if (firebaseUser || !demoUid || deletedDemoUids.includes(demoUid)) return null;
+    if (!import.meta.env.DEV || firebaseUser || !demoUid || deletedDemoUids.includes(demoUid)) {
+      return null;
+    }
     const base = TEST_DEMO_ACCOUNTS.find((a) => a.uid === demoUid);
     if (!base) return null;
     const patch = demoProfilePatch[demoUid] || {};
@@ -86,6 +106,7 @@ export function useAuth({ nowMs, isAuthModalOpen, onPromptCompleteProfile }: Use
 
   const handleLoginDemoAccount = useCallback(
     (account: DemoTestAccount) => {
+      if (!import.meta.env.DEV) return;
       if (firebaseUser) {
         signOut(auth).catch(() => {});
       }
@@ -189,11 +210,12 @@ export function useAuth({ nowMs, isAuthModalOpen, onPromptCompleteProfile }: Use
     onPromptCompleteProfile
   ]);
 
-  // 5. Admin-only Users & Banned Phones Listeners
+  // 5. Admin-only Users, Admins & Banned Phones Listeners
   useEffect(() => {
     if (!isAdmin) {
       setAllUsers([]);
       setBannedPhones([]);
+      setAdminUids([]);
       return;
     }
     const unsubUsers = onSnapshot(
@@ -210,9 +232,17 @@ export function useAuth({ nowMs, isAuthModalOpen, onPromptCompleteProfile }: Use
       },
       (err) => console.warn('Admin bannedPhones listener warning:', err.message)
     );
+    const unsubAdmins = onSnapshot(
+      collection(db, 'admins'),
+      (snap) => {
+        setAdminUids(snap.docs.map((d) => d.id));
+      },
+      (err) => console.warn('Admin list listener warning:', err.message)
+    );
     return () => {
       unsubUsers();
       unsubBans();
+      unsubAdmins();
     };
   }, [isAdmin]);
 
@@ -230,39 +260,43 @@ export function useAuth({ nowMs, isAuthModalOpen, onPromptCompleteProfile }: Use
   const mergedUsers = useMemo<UserProfile[]>(() => {
     const map = new Map<string, UserProfile>();
     allUsers.forEach((u) => map.set(u.uid, u));
-    TEST_DEMO_ACCOUNTS.forEach((acc) => {
-      if (deletedDemoUids.includes(acc.uid)) return;
-      if (!map.has(acc.uid)) {
-        const patch = demoProfilePatch[acc.uid] || {};
-        const statusOverride = demoProviderStatusMap[acc.uid];
-        map.set(acc.uid, {
-          ...acc,
-          ...patch,
-          providerStatus: statusOverride || patch.providerStatus || acc.providerStatus
-        });
-      }
-    });
+    if (import.meta.env.DEV) {
+      TEST_DEMO_ACCOUNTS.forEach((acc) => {
+        if (deletedDemoUids.includes(acc.uid)) return;
+        if (!map.has(acc.uid)) {
+          const patch = demoProfilePatch[acc.uid] || {};
+          const statusOverride = demoProviderStatusMap[acc.uid];
+          map.set(acc.uid, {
+            ...acc,
+            ...patch,
+            providerStatus: statusOverride || patch.providerStatus || acc.providerStatus
+          });
+        }
+      });
+    }
     return Array.from(map.values());
   }, [allUsers, deletedDemoUids, demoProfilePatch, demoProviderStatusMap]);
 
   const mergedBannedPhones = useMemo<BannedPhoneRecord[]>(() => {
     const map = new Map<string, BannedPhoneRecord>();
     bannedPhones.forEach((bp) => map.set(bp.phone, bp));
-    TEST_DEMO_ACCOUNTS.forEach((acc) => {
-      if (deletedDemoUids.includes(acc.uid)) return;
-      const patch = demoProfilePatch[acc.uid];
-      if (patch?.isBanned) {
-        const norm = normalizePhone(acc.phone);
-        map.set(norm, {
-          phone: norm,
-          userId: acc.uid,
-          userName: patch.displayName || acc.displayName,
-          reason: patch.banReason || '',
-          banUntilMs: patch.banUntilMs || 0,
-          isPermanent: !patch.banUntilMs
-        });
-      }
-    });
+    if (import.meta.env.DEV) {
+      TEST_DEMO_ACCOUNTS.forEach((acc) => {
+        if (deletedDemoUids.includes(acc.uid)) return;
+        const patch = demoProfilePatch[acc.uid];
+        if (patch?.isBanned) {
+          const norm = normalizePhone(acc.phone);
+          map.set(norm, {
+            phone: norm,
+            userId: acc.uid,
+            userName: patch.displayName || acc.displayName,
+            reason: patch.banReason || '',
+            banUntilMs: patch.banUntilMs || 0,
+            isPermanent: !patch.banUntilMs
+          });
+        }
+      });
+    }
     return Array.from(map.values());
   }, [bannedPhones, deletedDemoUids, demoProfilePatch]);
 
@@ -319,6 +353,7 @@ export function useAuth({ nowMs, isAuthModalOpen, onPromptCompleteProfile }: Use
     profileLoaded,
     ownPhoneBan,
     isAdmin,
+    adminUids,
     activeDemoAccount,
     demoProfilePatch,
     deletedDemoUids,

@@ -12,6 +12,7 @@ import {
   TutoringService,
   VillageRide,
   evaluateProviderAvailability,
+  isOrderEligibleForReview,
   parsePriceEgp
 } from './data/villageData';
 import { TRANSLATIONS } from './data/translations';
@@ -60,6 +61,7 @@ function AppShell() {
     profileLoaded,
     ownPhoneBan,
     isAdmin,
+    adminUids,
     activeDemoAccount,
     effectiveUid,
     effectiveProfile,
@@ -166,6 +168,12 @@ function AppShell() {
   const [isProviderReviewsModalOpen, setIsProviderReviewsModalOpen] = useState(false);
 
   const t = TRANSLATIONS[lang];
+
+  const eligibleOrdersForActiveTarget = activeReviewTarget.id
+    ? userOrders.filter((b) =>
+        isOrderEligibleForReview(b, activeReviewTarget.id, effectiveUid, reviews)
+      )
+    : [];
 
   // Review modal openers
   const handleOpenReviewsModal = (
@@ -381,6 +389,8 @@ function AppShell() {
           onToggleDarkMode={() => setDarkMode(!darkMode)}
           activeVillage={activeVillage}
           adminProfile={effectiveProfile}
+          currentAdminUid={firebaseUser?.uid || null}
+          adminUids={adminUids}
           providers={mergedProviders}
           ads={allAds}
           users={mergedUsers}
@@ -1051,6 +1061,7 @@ function AppShell() {
         reviewsCount={activeReviewTarget.reviewsCount}
         reviews={reviews}
         lang={lang}
+        eligibleReviewsCount={eligibleOrdersForActiveTarget.length}
         onOpenAddReview={() => {
           setIsProviderReviewsModalOpen(false);
           requireAuth(() => setIsReviewModalOpen(true));
@@ -1065,6 +1076,7 @@ function AppShell() {
         targetRole={activeReviewTarget.role}
         lang={lang}
         defaultName={effectiveProfile?.displayName || firebaseUser?.displayName || ''}
+        eligibleBookings={eligibleOrdersForActiveTarget}
         onSubmitReview={handleAddReview}
       />
 

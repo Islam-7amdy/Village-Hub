@@ -72,7 +72,10 @@ export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = (
       source: 'prescription',
       serviceType: 'pharmacy',
       title: lang === 'ar' ? 'صرف وتوصيل روشتة طبية' : 'Prescription Fulfillment & Delivery',
-      providerName: lang === 'ar' ? `صيدلية الشفاء - ${activeVillage.nameAr}` : `Al-Shifa Pharmacy - ${activeVillage.nameEn}`,
+      providerName:
+        lang === 'ar'
+          ? `صيدليات ${activeVillage.nameAr} المعتمدة`
+          : `Partner Pharmacy - ${activeVillage.nameEn}`,
       customerName: patientName.trim(),
       customerPhone: phone.trim(),
       address: fullAddress,
@@ -108,8 +111,8 @@ export const PrescriptionUploadModal: React.FC<PrescriptionUploadModalProps> = (
               <h3 className="text-base font-bold text-slate-900 dark:text-white">{t.sendPrescription}</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {lang === 'ar'
-                  ? `صيدلية الشفاء (${activeVillage.nameAr}) · صرف وتوصيل سريع`
-                  : `Al-Shifa Pharmacy (${activeVillage.nameEn}) · Express Delivery`}
+                  ? `صيدليات ${activeVillage.nameAr} · صرف روشتات وتوصيل سريع`
+                  : `Partner Pharmacies (${activeVillage.nameEn}) · Express Delivery`}
               </p>
             </div>
           </div>

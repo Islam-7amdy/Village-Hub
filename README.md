@@ -24,6 +24,8 @@
    - `GEMINI_API_KEY`: مفتاح Gemini API (اختياري للمساعد الذكي؛ يعمل التطبيق بدونه بردود محلية بديلة)
    - `GEMINI_MODEL`: اسم الموديل المستخدم للمساعد الذكي (الافتراضي `gemini-4-hydrogen`)
    - `APP_URL`: رابط التطبيق
+   - `VITE_RECAPTCHA_SITE_KEY`: مفتاح reCAPTCHA v3 لتفعيل Firebase App Check في الواجهة (اختياري)
+   - `FIREBASE_SERVICE_ACCOUNT_JSON`: بيانات Service Account الخاصة بـ Firebase Admin SDK بصيغة JSON (لتفعيل التحقق الكامل وحذف المستخدمين من Auth وفحص الحظر قبل إرسال SMS)
 
 3. تشغيل بيئة التطوير (Express + Vite Middleware):
    ```bash
@@ -38,12 +40,13 @@
    npm run build
    ```
    يتم إنشاء مجلد `dist/` وملف السيرفر المجمّع `server.js`.
+   (حسابات التجربة وبيانات العرض الوهمية معزولة تماماً داخل `import.meta.env.DEV` ولا تدخل في حزمة الإنتاج).
 
 2. تشغيل خادم الإنتاج:
    ```bash
    npm start
    ```
-   (يعمل بمتغير `NODE_ENV=production` ويخدم ملفات `dist/` الثابتة مع مسار `/api/village-assistant`).
+   (يعمل بمتغير `NODE_ENV=production` ويخدم ملفات `dist/` الثابتة مع مسارات `/api/village-assistant` و`/api/auth/check-ban` و`/api/admin/delete-user`).
 
 ## الأوامر المتاحة (Scripts)
 
@@ -57,9 +60,23 @@
 | `npm test` | تشغيل اختبارات الوحدة (`tsx --test tests/*.test.ts`) |
 | `npm run clean` | حذف `dist/` و`server.js` (متوافق مع Windows وLinux وmacOS) |
 
-## نشر قواعد Firestore (Firebase Rules)
+## نشر قواعد Firestore وإعداد الأمان في الإنتاج (Firebase & GCP Console)
 
-يتضمن المشروع ملف `firebase.json` و`firestore.rules`. لنشر القواعد باستخدام Firebase CLI:
-```bash
-firebase deploy --only firestore:rules
-```
+1. **نشر قواعد الأمان (`firestore.rules`):**
+   ```bash
+   firebase deploy --only firestore:rules
+   ```
+
+2. **إضافة صلاحية الأدمن (`/admins/{uid}`):**
+   لا توجد أي إيميلات أدمن ثابتة في الكود. لتعيين مدير للمنصة، أنشئ مستنداً في Firestore داخل collection باسم `admins` يكون معرفه `uid` الخاص بحساب الأدمن في Firebase Authentication (يمكن أن يحتوي مثلاً `{ active: true }`).
+
+3. **Firebase Admin SDK على الخادم (`FIREBASE_SERVICE_ACCOUNT_JSON`):**
+   اضبط `FIREBASE_SERVICE_ACCOUNT_JSON` (أو `GOOGLE_APPLICATION_CREDENTIALS`) حتى يتمكن الخادم من:
+   - حذف حسابات المستخدمين نهائياً من Firebase Authentication + Firestore عند الحذف من لوحة الأدمن (`/api/admin/delete-user`).
+   - التحقق السريع من أرقام الهواتف المحظورة قبل إرسال رسائل SMS OTP (`/api/auth/check-ban`).
+
+4. **حماية مفتاح Firebase API وSMS Quota (إجراء مطلوب في لوحة التحكم):**
+   - **تقييد مفتاح المتصفح (HTTP Referrers):** من Google Cloud Console -> APIs & Services -> Credentials -> تقييد مفتاح المتصفح بنطاقات الموقع المعتمدة فقط (مثل `noqbas.example.com/*`).
+   - **تفعيل Firebase App Check:** سجّل موقعك بـ reCAPTCHA v3 في Firebase Console -> App Check، وضع `VITE_RECAPTCHA_SITE_KEY` في البيئة، ثم فعّل Enforce على Firestore وAuthentication.
+   - **حظر مناطق SMS غير المصرح بها:** من Firebase Console -> Authentication -> Settings -> SMS region policy -> فعّل **Allow only** لجمهورية مصر العربية (`+20`) لمنع استنزاف رصيد الرسائل النصية دولياً.
+

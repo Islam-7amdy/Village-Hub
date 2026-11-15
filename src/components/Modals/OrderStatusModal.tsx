@@ -19,8 +19,6 @@ import {
   ChefHat,
   Truck,
   XCircle,
-  CreditCard,
-  Smartphone,
   Landmark,
   Banknote,
   MapPin,
@@ -50,10 +48,6 @@ export function getStatusLabel(
 
 export function getPaymentMethodLabel(method: PaymentMethod | undefined, lang: Language): string {
   switch (method) {
-    case 'card':
-      return lang === 'ar' ? 'بطاقة بنكية' : 'Bank Card';
-    case 'vodafone_cash':
-      return lang === 'ar' ? 'محفظة إلكترونية' : 'Mobile Wallet';
     case 'instapay':
       return 'InstaPay';
     case 'cod':
@@ -116,10 +110,6 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
 
   const renderPaymentIcon = (method?: PaymentMethod) => {
     switch (method) {
-      case 'card':
-        return <CreditCard className="w-3.5 h-3.5" />;
-      case 'vodafone_cash':
-        return <Smartphone className="w-3.5 h-3.5" />;
       case 'instapay':
         return <Landmark className="w-3.5 h-3.5" />;
       case 'cod':

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Language, ReviewItem } from '../../data/villageData';
+import { BookingRequest, Language, ReviewItem } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
-import { X, Star, CheckCircle, ShieldCheck } from 'lucide-react';
+import { X, Star, CheckCircle, ShieldCheck, AlertTriangle, Loader2 } from 'lucide-react';
 
 interface ReviewModalProps {
   isOpen: boolean;
@@ -11,7 +11,8 @@ interface ReviewModalProps {
   targetRole: string;
   lang: Language;
   defaultName?: string;
-  onSubmitReview: (review: ReviewItem) => void;
+  eligibleBookings: BookingRequest[];
+  onSubmitReview: (review: ReviewItem) => void | Promise<void>;
 }
 
 export const ReviewModal: React.FC<ReviewModalProps> = ({
@@ -22,6 +23,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   targetRole,
   lang,
   defaultName = '',
+  eligibleBookings,
   onSubmitReview
 }) => {
   const t = TRANSLATIONS[lang];
@@ -30,12 +32,20 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   const [authorName, setAuthorName] = useState(defaultName);
   const [neighborhood, setNeighborhood] = useState('الناحية الشرقية');
   const [comment, setComment] = useState('');
-  const [isVerified, setIsVerified] = useState(true);
+  const [selectedBookingId, setSelectedBookingId] = useState<string>(eligibleBookings[0]?.id || '');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (defaultName && !authorName) setAuthorName(defaultName);
-  }, [defaultName]);
+  }, [defaultName, authorName]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedBookingId(eligibleBookings[0]?.id || '');
+      setError('');
+    }
+  }, [isOpen, eligibleBookings]);
 
   if (!isOpen) return null;
 
@@ -55,8 +65,16 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     1: { ar: 'مش عاجبني - حصلت مشاكل في الخدمة', en: 'Unsatisfied - Encountered service issues' }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedBookingId) {
+      setError(
+        lang === 'ar'
+          ? 'يلزم وجود طلب مكتمل مع مقدم الخدمة لإضافة تقييم موثق.'
+          : 'A completed order with this provider is required to submit a review.'
+      );
+      return;
+    }
     const finalAuthor = authorName.trim() || defaultName;
     if (!finalAuthor) {
       setError(lang === 'ar' ? 'اكتب اسمك الأول لو سمحت' : 'Please enter your name');
@@ -72,7 +90,8 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     ) || { ar: neighborhood, en: neighborhood };
 
     const newReview: ReviewItem = {
-      id: `rev-${Date.now()}`,
+      id: `rev-${selectedBookingId}`,
+      bookingId: selectedBookingId,
       targetId,
       author: finalAuthor,
       neighborhood: matchedNeighborhood,
@@ -82,12 +101,26 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
         ar: comment.trim(),
         en: comment.trim()
       },
-      isVerifiedResident: isVerified
+      isVerifiedResident: true
     };
 
-    onSubmitReview(newReview);
-    setComment('');
-    onClose();
+    setIsSubmitting(true);
+    setError('');
+    try {
+      await onSubmitReview(newReview);
+      setComment('');
+      onClose();
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : lang === 'ar'
+          ? 'تعذر حفظ التقييم. تأكد من أن الطلب مكتمل ولم يتم تقييمه مسبقاً.'
+          : 'Could not save review. Ensure your order is completed and not yet reviewed.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const activeScore = hoverRating || rating;
@@ -115,6 +148,41 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
 
         {/* Content */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto">
+          {eligibleBookings.length === 0 ? (
+            <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-bold">
+                  {lang === 'ar'
+                    ? 'التقييم متاح بعد إتمام الطلب فقط'
+                    : 'Reviews require a completed order'}
+                </div>
+                <div className="opacity-90">
+                  {lang === 'ar'
+                    ? 'يجب أن يكون لديك طلب أو حجز مكتمل مع مقدم الخدمة هذا لم تقم بتقييمه من قبل.'
+                    : 'You need at least one completed, unreviewed booking with this service provider to submit a verified review.'}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                {lang === 'ar' ? 'الطلب المكتمل المرتبط بالتقييم' : 'Completed Order Being Reviewed'}
+              </label>
+              <select
+                value={selectedBookingId}
+                onChange={(e) => setSelectedBookingId(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+              >
+                {eligibleBookings.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.title} · {b.date || b.createdAt}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {error && (
             <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">
               {error}
@@ -213,20 +281,14 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             />
           </div>
 
-          {/* Verified Resident Check */}
-          <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="text-xs font-medium text-emerald-900 dark:text-emerald-200">
-                {t.verifiedResident}
-              </span>
-            </div>
-            <input
-              type="checkbox"
-              checked={isVerified}
-              onChange={(e) => setIsVerified(e.target.checked)}
-              className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
-            />
+          {/* Verified Purchase Badge (System Enforced) */}
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
+            <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span className="text-xs font-medium text-emerald-900 dark:text-emerald-200">
+              {lang === 'ar'
+                ? 'تقييم موثق بناءً على طلب مكتمل من حسابك'
+                : 'Verified review linked automatically to your completed order'}
+            </span>
           </div>
 
           {/* Actions */}
@@ -240,9 +302,14 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             </button>
             <button
               type="submit"
-              className="flex-1 py-2.5 px-4 text-xs font-semibold rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
+              disabled={isSubmitting || eligibleBookings.length === 0}
+              className="flex-1 py-2.5 px-4 text-xs font-semibold rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
             >
-              <CheckCircle className="w-4 h-4" />
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCircle className="w-4 h-4" />
+              )}
               <span>{lang === 'ar' ? 'نشر التقييم' : 'Post Review'}</span>
             </button>
           </div>

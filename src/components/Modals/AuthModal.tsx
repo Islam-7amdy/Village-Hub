@@ -16,7 +16,6 @@ import {
   auth,
   db,
   googleProvider,
-  ADMIN_EMAIL,
   handleFirestoreError,
   OperationType
 } from '../../firebase';
@@ -26,12 +25,12 @@ import {
   BannedPhoneRecord,
   DemoTestAccount,
   ServiceSectionConfig,
-  TEST_DEMO_ACCOUNTS,
   normalizePhone,
   phoneToAuthEmail,
   toE164Phone,
   isBanCurrentlyActive
 } from '../../data/villageData';
+import { TEST_DEMO_ACCOUNTS } from '../../data/demoSeedData';
 import { TRANSLATIONS } from '../../data/translations';
 import {
   X,
@@ -347,6 +346,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     return verifier;
   };
 
+  const checkPreAuthBan = async (normalizedPhone: string): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/auth/check-ban', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: normalizedPhone })
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        banned?: boolean;
+        banUntilMs?: number;
+        isPermanent?: boolean;
+        reason?: string;
+      };
+      if (data.banned) {
+        const expiryText = data.isPermanent
+          ? lang === 'ar'
+            ? 'حظر دائم'
+            : 'Permanent ban'
+          : data.banUntilMs
+          ? new Date(data.banUntilMs).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')
+          : lang === 'ar'
+          ? 'حظر نشط'
+          : 'Active ban';
+        return lang === 'ar'
+          ? `رقم الموبايل (${normalizedPhone}) محظور من المنصة (${expiryText})${data.reason ? ` - السبب: ${data.reason}` : ''}.`
+          : `Phone number (${normalizedPhone}) is currently banned (${expiryText}).`;
+      }
+    } catch {
+      // Fallback to post-auth Firestore check
+    }
+    return null;
+  };
+
   const checkBanForPhone = async (normalizedPhone: string): Promise<string | null> => {
     try {
       const banSnap = await getDoc(doc(db, 'bannedPhones', normalizedPhone));
@@ -493,26 +526,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Support Test Demo Accounts via Phone + Password (123456)
-    const matchedDemo = TEST_DEMO_ACCOUNTS.find(
-      (acc) => normalizePhone(acc.phone) === normalized && acc.password === password
-    );
-    if (matchedDemo) {
-      onLoginDemoAccount(matchedDemo);
-      setSuccessMsg(
-        lang === 'ar'
-          ? `أهلاً بيك يا ${matchedDemo.displayName}! تم تسجيل الدخول بحساب التجربة.`
-          : `Welcome back, ${matchedDemo.displayName}!`
+    if (import.meta.env.DEV) {
+      // Support Test Demo Accounts via Phone + Password (DEV only)
+      const matchedDemo = TEST_DEMO_ACCOUNTS.find(
+        (acc) => normalizePhone(acc.phone) === normalized && acc.password === password
       );
-      setTimeout(() => {
-        setSuccessMsg('');
-        onClose();
-      }, 700);
-      return;
+      if (matchedDemo) {
+        onLoginDemoAccount(matchedDemo);
+        setSuccessMsg(
+          lang === 'ar'
+            ? `أهلاً بيك يا ${matchedDemo.displayName}! تم تسجيل الدخول بحساب التجربة.`
+            : `Welcome back, ${matchedDemo.displayName}!`
+        );
+        setTimeout(() => {
+          setSuccessMsg('');
+          onClose();
+        }, 700);
+        return;
+      }
     }
 
     setIsLoading(true);
     try {
+      const preBanMessage = await checkPreAuthBan(normalized);
+      if (preBanMessage) {
+        setError(preBanMessage);
+        setIsLoading(false);
+        return;
+      }
       const authEmail = phoneToAuthEmail(normalized);
       const cred = await signInWithEmailAndPassword(auth, authEmail, password);
       const signedInUser = cred.user;
@@ -617,6 +658,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setIsLoading(true);
     try {
+      const preBanMessage = await checkPreAuthBan(normalized);
+      if (preBanMessage) {
+        setError(preBanMessage);
+        setIsLoading(false);
+        return;
+      }
       const verifier = getOrCreateRecaptcha();
       const result = await signInWithPhoneNumber(auth, e164, verifier);
       setConfirmationResult(result);
@@ -747,6 +794,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setIsLoading(true);
     try {
+      const preBanMessage = await checkPreAuthBan(normalized);
+      if (preBanMessage) {
+        setError(preBanMessage);
+        setIsLoading(false);
+        return;
+      }
       const verifier = getOrCreateRecaptcha();
       const result = await signInWithPhoneNumber(auth, e164, verifier);
       setConfirmationResult(result);
@@ -926,12 +979,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Admin / Google fallback login
+  // Admin Google Login (must exist in Firestore /admins/{uid})
   const handleAdminGoogleSignIn = async () => {
     setError('');
     setIsLoading(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const cred = await signInWithPopup(auth, googleProvider);
+      const adminSnap = await getDoc(doc(db, 'admins', cred.user.uid));
+      if (!adminSnap.exists()) {
+        await signOut(auth);
+        setError(
+          lang === 'ar'
+            ? 'هذا الحساب غير مسجل كمدير للمنصة في جدول الصلاحيات (/admins).'
+            : 'This Google account is not registered as a platform admin (/admins).'
+        );
+        return;
+      }
+      onClose();
     } catch (err) {
       setError(
         lang === 'ar'
@@ -1529,73 +1593,74 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </button>
                   </div>
 
-                  {/* Quick Test Accounts Showcase (2 Users + 2 Service Providers) */}
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-slate-800 dark:text-slate-200">
-                        {lang === 'ar'
-                          ? 'حسابات التجربة السريعة (قرية نقباس)'
-                          : 'Quick Test Accounts (Noqbas Village)'}
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                        {lang === 'ar' ? 'كلمة السر: 123456' : 'Pass: 123456'}
-                      </span>
-                    </div>
+                  {import.meta.env.DEV && (
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-800 dark:text-slate-200">
+                          {lang === 'ar'
+                            ? 'حسابات التجربة السريعة (قرية نقباس)'
+                            : 'Quick Test Accounts (Noqbas Village)'}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                          {lang === 'ar' ? 'بيئة التطوير فقط' : 'DEV Mode Only'}
+                        </span>
+                      </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {TEST_DEMO_ACCOUNTS.map((acc) => {
-                        const isProvider = acc.role === 'provider';
-                        return (
-                          <button
-                            key={acc.uid}
-                            type="button"
-                            onClick={() => {
-                              onLoginDemoAccount(acc);
-                              onClose();
-                            }}
-                            className={`p-2.5 rounded-2xl border text-start transition-all cursor-pointer hover:shadow-xs ${
-                              isProvider
-                                ? 'border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-50'
-                                : 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 hover:bg-emerald-50'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-1.5 mb-1">
-                              <span className="font-bold text-slate-900 dark:text-white truncate">
-                                {acc.displayName}
-                              </span>
-                              <span
-                                className={`text-[10px] font-bold shrink-0 ${
-                                  isProvider
-                                    ? 'text-amber-700 dark:text-amber-400'
-                                    : 'text-emerald-700 dark:text-emerald-400'
-                                }`}
-                              >
-                                {isProvider
-                                  ? acc.providerStatus === 'approved'
-                                    ? lang === 'ar'
-                                      ? 'مقدم خدمة ✓'
-                                      : 'Provider ✓'
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {TEST_DEMO_ACCOUNTS.map((acc) => {
+                          const isProvider = acc.role === 'provider';
+                          return (
+                            <button
+                              key={acc.uid}
+                              type="button"
+                              onClick={() => {
+                                onLoginDemoAccount(acc);
+                                onClose();
+                              }}
+                              className={`p-2.5 rounded-2xl border text-start transition-all cursor-pointer hover:shadow-xs ${
+                                isProvider
+                                  ? 'border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-50'
+                                  : 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 hover:bg-emerald-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-1.5 mb-1">
+                                <span className="font-bold text-slate-900 dark:text-white truncate">
+                                  {acc.displayName}
+                                </span>
+                                <span
+                                  className={`text-[10px] font-bold shrink-0 ${
+                                    isProvider
+                                      ? 'text-amber-700 dark:text-amber-400'
+                                      : 'text-emerald-700 dark:text-emerald-400'
+                                  }`}
+                                >
+                                  {isProvider
+                                    ? acc.providerStatus === 'approved'
+                                      ? lang === 'ar'
+                                        ? 'مقدم خدمة ✓'
+                                        : 'Provider ✓'
+                                      : lang === 'ar'
+                                      ? 'مقدم خدمة (مراجعة)'
+                                      : 'Provider (Pending)'
                                     : lang === 'ar'
-                                    ? 'مقدم خدمة (مراجعة)'
-                                    : 'Provider (Pending)'
-                                  : lang === 'ar'
-                                  ? 'مستخدم'
-                                  : 'User'}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                              <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
-                                {acc.phone}
-                              </span>
-                              <span className="font-bold text-amber-700 dark:text-amber-400">
-                                {lang === 'ar' ? 'دخول سريع ←' : 'Quick Sign In →'}
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      })}
+                                    ? 'مستخدم'
+                                    : 'User'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                                <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                                  {acc.phone}
+                                </span>
+                                <span className="font-bold text-amber-700 dark:text-amber-400">
+                                  {lang === 'ar' ? 'دخول سريع ←' : 'Quick Sign In →'}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </form>
               ) : (
                 /* Tab 2 Form: New User Registration (Name + Phone + Address + Password + SMS OTP) */
@@ -1835,9 +1900,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {forgotStep === 'none' && (
                 <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500">
                   <span className="truncate">
-                    {lang === 'ar'
-                      ? `دخول الإدارة (${ADMIN_EMAIL}):`
-                      : `Platform Admin (${ADMIN_EMAIL}):`}
+                    {lang === 'ar' ? 'دخول الإدارة:' : 'Platform Admin:'}
                   </span>
                   <button
                     type="button"
