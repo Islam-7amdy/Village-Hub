@@ -3,10 +3,13 @@ import {
   BookingRequest,
   BookingStatus,
   Language,
+  ProviderAvailabilityConfig,
   ProviderListing,
   ReviewItem,
   UserProfile,
   VillageConfig,
+  WEEKDAY_LABELS,
+  evaluateProviderAvailability,
   getVillageTheme,
   getAllowedStatusesForService,
   getServiceStatusLabel,
@@ -42,7 +45,8 @@ import {
   Settings,
   PackageCheck,
   FileSpreadsheet,
-  Store
+  Store,
+  Power
 } from 'lucide-react';
 
 interface ProviderWorkspaceProps {
@@ -65,6 +69,8 @@ interface ProviderWorkspaceProps {
     newStatus: BookingStatus,
     deliveryMeta?: { deliveryConfirmedRef: string; deliveryConfirmedAt: string }
   ) => void;
+  onUpdateAvailability: (availability: ProviderAvailabilityConfig) => Promise<void> | void;
+  nowMs?: number;
   onOpenNotifications: () => void;
   onOpenAuth: () => void;
 }
@@ -99,6 +105,8 @@ export const ProviderWorkspace: React.FC<ProviderWorkspaceProps> = ({
   banReason,
   banUntilMs,
   onUpdateOrderStatus,
+  onUpdateAvailability,
+  nowMs = Date.now(),
   onOpenNotifications,
   onOpenAuth
 }) => {
@@ -112,6 +120,132 @@ export const ProviderWorkspace: React.FC<ProviderWorkspaceProps> = ({
   const [verifyingOrderId, setVerifyingOrderId] = useState<string | null>(null);
   const [deliveryRefInput, setDeliveryRefInput] = useState<string>('');
   const [deliveryRefError, setDeliveryRefError] = useState<string>('');
+
+  // Provider Availability & Working Hours Draft State
+  const [isAcceptingDraft, setIsAcceptingDraft] = useState<boolean>(
+    providerListing?.isAcceptingOrders !== false
+  );
+  const [closedReasonDraft, setClosedReasonDraft] = useState<string>(
+    providerListing?.manualClosedReason || ''
+  );
+  const [scheduleEnabledDraft, setScheduleEnabledDraft] = useState<boolean>(
+    Boolean(providerListing?.scheduleEnabled)
+  );
+  const [openTimeDraft, setOpenTimeDraft] = useState<string>(
+    providerListing?.openTime || '09:00'
+  );
+  const [closeTimeDraft, setCloseTimeDraft] = useState<string>(
+    providerListing?.closeTime || '22:00'
+  );
+  const [workingDaysDraft, setWorkingDaysDraft] = useState<number[]>(
+    Array.isArray(providerListing?.workingDays) && providerListing.workingDays.length > 0
+      ? providerListing.workingDays
+      : [6, 0, 1, 2, 3, 4]
+  );
+  const [isSavingAvailability, setIsSavingAvailability] = useState<boolean>(false);
+  const [availabilitySavedMsg, setAvailabilitySavedMsg] = useState<string>('');
+
+  React.useEffect(() => {
+    setIsAcceptingDraft(providerListing?.isAcceptingOrders !== false);
+    setClosedReasonDraft(providerListing?.manualClosedReason || '');
+    setScheduleEnabledDraft(Boolean(providerListing?.scheduleEnabled));
+    setOpenTimeDraft(providerListing?.openTime || '09:00');
+    setCloseTimeDraft(providerListing?.closeTime || '22:00');
+    setWorkingDaysDraft(
+      Array.isArray(providerListing?.workingDays)
+        ? providerListing.workingDays
+        : [6, 0, 1, 2, 3, 4]
+    );
+  }, [
+    providerListing?.isAcceptingOrders,
+    providerListing?.manualClosedReason,
+    providerListing?.scheduleEnabled,
+    providerListing?.openTime,
+    providerListing?.closeTime,
+    providerListing?.workingDays
+  ]);
+
+  const currentLiveAvailability = useMemo(
+    () => evaluateProviderAvailability(providerListing, nowMs),
+    [providerListing, nowMs]
+  );
+
+  const previewDraftAvailability = useMemo(
+    () =>
+      evaluateProviderAvailability(
+        {
+          isAcceptingOrders: isAcceptingDraft,
+          manualClosedReason: closedReasonDraft,
+          scheduleEnabled: scheduleEnabledDraft,
+          openTime: openTimeDraft,
+          closeTime: closeTimeDraft,
+          workingDays: workingDaysDraft
+        },
+        nowMs
+      ),
+    [
+      isAcceptingDraft,
+      closedReasonDraft,
+      scheduleEnabledDraft,
+      openTimeDraft,
+      closeTimeDraft,
+      workingDaysDraft,
+      nowMs
+    ]
+  );
+
+  const buildAvailabilityPayload = (overrideAccepting?: boolean): ProviderAvailabilityConfig => ({
+    isAcceptingOrders:
+      typeof overrideAccepting === 'boolean' ? overrideAccepting : isAcceptingDraft,
+    manualClosedReason: closedReasonDraft.trim().slice(0, 120),
+    scheduleEnabled: scheduleEnabledDraft,
+    openTime: openTimeDraft || '09:00',
+    closeTime: closeTimeDraft || '22:00',
+    workingDays: workingDaysDraft
+  });
+
+  const handleQuickToggleAccepting = async () => {
+    const nextAccepting = !(providerListing?.isAcceptingOrders !== false);
+    setIsAcceptingDraft(nextAccepting);
+    setIsSavingAvailability(true);
+    try {
+      await onUpdateAvailability(buildAvailabilityPayload(nextAccepting));
+      setAvailabilitySavedMsg(
+        nextAccepting
+          ? lang === 'ar'
+            ? 'تم فتح استقبال الطلبات الآن ✓'
+            : 'Orders enabled — You are now Open ✓'
+          : lang === 'ar'
+          ? 'تم إيقاف استقبال الطلبات والظهور كمغلق ✓'
+          : 'Orders paused — You now appear Closed ✓'
+      );
+      setTimeout(() => setAvailabilitySavedMsg(''), 3000);
+    } finally {
+      setIsSavingAvailability(false);
+    }
+  };
+
+  const handleSaveAvailabilitySettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingAvailability(true);
+    try {
+      await onUpdateAvailability(buildAvailabilityPayload());
+      setAvailabilitySavedMsg(
+        lang === 'ar'
+          ? 'تم حفظ حالة التوافر ومواعيد العمل بنجاح ✓'
+          : 'Availability & working hours saved ✓'
+      );
+      setTimeout(() => setAvailabilitySavedMsg(''), 3000);
+    } finally {
+      setIsSavingAvailability(false);
+    }
+  };
+
+  const toggleWorkingDay = (day: number) => {
+    setWorkingDaysDraft((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  };
 
   const metrics = useMemo(() => {
     const activeOrders = orders.filter(
@@ -596,10 +730,10 @@ export const ProviderWorkspace: React.FC<ProviderWorkspaceProps> = ({
               </div>
             </div>
 
-            {/* Explicit Activity Approval State + Account Edit CTA */}
-            <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {/* Explicit Activity Approval State + Live Open/Closed Quick Switch + Account Edit CTA */}
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
               <div
-                className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+                className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-2 ${
                   effectiveStatus === 'approved'
                     ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
                     : effectiveStatus === 'rejected'
@@ -611,35 +745,107 @@ export const ProviderWorkspace: React.FC<ProviderWorkspaceProps> = ({
                   <>
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>
-                      {lang === 'ar' ? 'حالة النشاط: معتمد وظاهر للأهالي' : 'Status: Approved & Live'}
+                      {lang === 'ar' ? 'نشاط معتمد' : 'Approved'}
                     </span>
                   </>
                 ) : effectiveStatus === 'rejected' ? (
                   <>
                     <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
                     <span>
-                      {lang === 'ar' ? 'حالة النشاط: يحتاج مراجعة وتعديل' : 'Status: Revision Needed'}
+                      {lang === 'ar' ? 'يحتاج مراجعة' : 'Revision Needed'}
                     </span>
                   </>
                 ) : (
                   <>
                     <Clock className="w-4 h-4 text-amber-600 shrink-0" />
                     <span>
-                      {lang === 'ar' ? 'حالة النشاط: قيد مراجعة الإدارة' : 'Status: Pending Review'}
+                      {lang === 'ar' ? 'قيد المراجعة' : 'Pending Review'}
                     </span>
                   </>
                 )}
               </div>
 
+              {/* Instant Open / Closed Toggle Button */}
+              <button
+                type="button"
+                disabled={isSavingAvailability}
+                onClick={handleQuickToggleAccepting}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors disabled:opacity-60 ${
+                  currentLiveAvailability.isOpen
+                    ? 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                    : providerListing?.isAcceptingOrders === false
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                }`}
+              >
+                <Power className="w-3.5 h-3.5" />
+                <span>
+                  {providerListing?.isAcceptingOrders === false
+                    ? lang === 'ar'
+                      ? 'إعادة فتح واستقبال الطلبات'
+                      : 'Reopen & Accept Orders'
+                    : lang === 'ar'
+                    ? 'إيقاف استلام الطلبات (إغلاق الآن)'
+                    : 'Pause Orders (Appear Closed)'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setWorkspaceTab('activity')}
+                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>{lang === 'ar' ? 'مواعيد العمل' : 'Hours'}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={onOpenAuth}
-                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
               >
                 <Settings className="w-3.5 h-3.5" />
-                <span>{lang === 'ar' ? 'إدارة الحساب / خروج' : 'Account / Sign Out'}</span>
+                <span>{lang === 'ar' ? 'الحساب' : 'Account'}</span>
               </button>
             </div>
+          </div>
+
+          {/* Live Platform Visibility Bar */}
+          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`px-2.5 py-1 rounded-lg font-bold inline-flex items-center gap-1.5 ${
+                  currentLiveAvailability.isOpen
+                    ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300'
+                }`}
+              >
+                {currentLiveAvailability.isOpen ? (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {lang === 'ar'
+                    ? `الظهور للأهالي الآن: ${currentLiveAvailability.labelAr}`
+                    : `Public Status: ${currentLiveAvailability.labelEn}`}
+                </span>
+              </span>
+
+              {currentLiveAvailability.scheduleTextAr && (
+                <span className="text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                  {lang === 'ar'
+                    ? `مواعيد العمل المحددة: ${currentLiveAvailability.scheduleTextAr}`
+                    : `Schedule: ${currentLiveAvailability.scheduleTextEn}`}
+                </span>
+              )}
+            </div>
+
+            {availabilitySavedMsg && (
+              <span className="text-emerald-700 dark:text-emerald-400 font-bold">
+                {availabilitySavedMsg}
+              </span>
+            )}
           </div>
         </section>
 
@@ -1333,6 +1539,188 @@ export const ProviderWorkspace: React.FC<ProviderWorkspaceProps> = ({
                   <p className="text-slate-800 dark:text-slate-200 leading-relaxed">{activityBio}</p>
                 </div>
               )}
+
+              {/* Availability & Operating Hours Scheduler */}
+              <form
+                onSubmit={handleSaveAvailabilitySettings}
+                className="pt-5 border-t border-slate-200 dark:border-slate-800 space-y-5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Clock className={`w-4 h-4 ${theme.text}`} />
+                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                      {lang === 'ar' ? 'التحكم في استقبال الطلبات ومواعيد العمل' : 'Order Availability & Working Hours'}
+                    </h3>
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                      previewDraftAvailability.isOpen
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300'
+                    }`}
+                  >
+                    {lang === 'ar' ? previewDraftAvailability.labelAr : previewDraftAvailability.labelEn}
+                  </span>
+                </div>
+
+                {/* Manual Pause / Open Switch */}
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-slate-900 dark:text-white">
+                        {lang === 'ar' ? 'استقبال الطلبات الآن' : 'Accepting New Orders Now'}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        {lang === 'ar'
+                          ? 'عند الإيقاف، يظهر نشاطك كمغلق أمام أهالي القرية ولن يتمكن العملاء من إرسال طلبات جديدة.'
+                          : 'When paused, your business appears Closed and residents cannot submit new orders.'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAcceptingDraft((prev) => !prev)}
+                      className={`px-4 py-2 rounded-xl font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+                        isAcceptingDraft
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-rose-600 hover:bg-rose-700 text-white'
+                      }`}
+                    >
+                      <Power className="w-3.5 h-3.5" />
+                      <span>
+                        {isAcceptingDraft
+                          ? lang === 'ar'
+                            ? 'مفتوح ويستقبل الطلبات'
+                            : 'Open for Orders'
+                          : lang === 'ar'
+                          ? 'مغلق (متوقف مؤقتاً)'
+                          : 'Closed (Paused)'}
+                      </span>
+                    </button>
+                  </div>
+
+                  {!isAcceptingDraft && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                        {lang === 'ar'
+                          ? 'سبب الإغلاق المؤقت (اختياري — يظهر للعملاء):'
+                          : 'Closure note (optional — visible to customers):'}
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={120}
+                        value={closedReasonDraft}
+                        onChange={(e) => setClosedReasonDraft(e.target.value)}
+                        placeholder={
+                          lang === 'ar'
+                            ? 'مثال: مغلق للصلاة، إجازة اليوم، أو ضغط طلبات مؤقت'
+                            : 'e.g. Closed for break, holiday, or busy queue'
+                        }
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Scheduled Working Hours */}
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-4 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-slate-900 dark:text-white">
+                        {lang === 'ar' ? 'تحديد مواعيد العمل اليومية التلقائية' : 'Automatic Working Hours Schedule'}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        {lang === 'ar'
+                          ? 'يظهر نشاطك كمغلق تلقائياً خارج ساعات وأيام العمل المحددة.'
+                          : 'Automatically shows your business as Closed outside these hours and days.'}
+                      </div>
+                    </div>
+                    <label className="inline-flex items-center gap-2 cursor-pointer font-bold text-slate-800 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={scheduleEnabledDraft}
+                        onChange={(e) => setScheduleEnabledDraft(e.target.checked)}
+                        className="w-4 h-4 accent-amber-600 rounded cursor-pointer"
+                      />
+                      <span>{lang === 'ar' ? 'تفعيل جدول المواعيد' : 'Enable Schedule'}</span>
+                    </label>
+                  </div>
+
+                  {scheduleEnabledDraft && (
+                    <div className="space-y-4 pt-2 border-t border-slate-200/80 dark:border-slate-700">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                            {lang === 'ar' ? 'يفتح من الساعة:' : 'Opens at:'}
+                          </label>
+                          <input
+                            type="time"
+                            value={openTimeDraft}
+                            onChange={(e) => setOpenTimeDraft(e.target.value || '09:00')}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                            {lang === 'ar' ? 'يغلق الساعة:' : 'Closes at:'}
+                          </label>
+                          <input
+                            type="time"
+                            value={closeTimeDraft}
+                            onChange={(e) => setCloseTimeDraft(e.target.value || '22:00')}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-2">
+                          {lang === 'ar' ? 'أيام العمل الأسبوعية:' : 'Working Days:'}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {WEEKDAY_LABELS.map((wd) => {
+                            const active = workingDaysDraft.includes(wd.day);
+                            return (
+                              <button
+                                key={wd.day}
+                                type="button"
+                                onClick={() => toggleWorkingDay(wd.day)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                                  active
+                                    ? `${theme.solidBg} text-white`
+                                    : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                                }`}
+                              >
+                                {lang === 'ar' ? wd.labelAr : wd.labelEn}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    type="submit"
+                    disabled={isSavingAvailability}
+                    className={`px-5 py-2.5 rounded-xl ${theme.solidBg} ${theme.hoverBg} text-white text-xs font-bold cursor-pointer disabled:opacity-60`}
+                  >
+                    {isSavingAvailability
+                      ? lang === 'ar'
+                        ? 'جاري الحفظ...'
+                        : 'Saving...'
+                      : lang === 'ar'
+                      ? 'حفظ حالة التوافر ومواعيد العمل'
+                      : 'Save Availability & Hours'}
+                  </button>
+                  {availabilitySavedMsg && (
+                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                      {availabilitySavedMsg}
+                    </span>
+                  )}
+                </div>
+              </form>
             </div>
 
             {/* Resident Reviews Column */}

@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { TechnicianService, Language } from '../../data/villageData';
+import { TechnicianService, Language, evaluateProviderAvailability } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
-import { Wrench, Phone, MessageCircle, Calendar, Star, MapPin, CheckCircle2 } from 'lucide-react';
+import { Wrench, Phone, MessageCircle, Calendar, Star, MapPin, CheckCircle2, Lock } from 'lucide-react';
 
 interface TechniciansSectionProps {
   technicians: TechnicianService[];
   lang: Language;
   canUseServices: boolean;
+  nowMs?: number;
   onRequireLogin: () => void;
   onRequestTechnician: (tech: TechnicianService) => void;
   onViewReviews?: (targetId: string, name: string, role: string, avatar: string, rating: number, reviewsCount: number) => void;
@@ -17,6 +18,7 @@ export const TechniciansSection: React.FC<TechniciansSectionProps> = ({
   technicians,
   lang,
   canUseServices,
+  nowMs,
   onRequireLogin,
   onRequestTechnician,
   onViewReviews,
@@ -74,127 +76,175 @@ export const TechniciansSection: React.FC<TechniciansSectionProps> = ({
 
       {/* Technicians Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {filtered.map((tech) => (
-          <div
-            key={tech.id}
-            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-all flex flex-col justify-between space-y-4"
-          >
-            <div className="space-y-3">
-              <div className="flex items-start gap-4">
-                <img
-                  src={tech.avatar}
-                  alt={tech.name[lang]}
-                  referrerPolicy="no-referrer"
-                  className="w-16 h-16 rounded-2xl object-cover shrink-0 border border-slate-200 dark:border-slate-700 shadow-2xs"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                      {tech.name[lang]}
-                    </h3>
-                    {onViewReviews ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onViewReviews(
-                            tech.id,
-                            tech.name[lang],
-                            tech.craft[lang],
-                            tech.avatar,
-                            tech.rating,
-                            tech.reviewsCount
-                          )
-                        }
-                        className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors flex items-center gap-1 shrink-0 cursor-pointer bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-lg border border-amber-200/50 dark:border-amber-900/40"
-                        title={t.reviews}
-                      >
-                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                        <span>{tech.rating}</span>
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
-                          ({tech.reviewsCount})
+        {filtered.map((tech) => {
+          const avail = evaluateProviderAvailability(tech.availability, nowMs);
+          return (
+            <div
+              key={tech.id}
+              className={`bg-white dark:bg-slate-900 rounded-2xl border p-5 shadow-2xs transition-all flex flex-col justify-between space-y-4 ${
+                avail.isOpen
+                  ? 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                  : 'border-rose-200/80 dark:border-rose-900/50 opacity-85'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-start gap-4">
+                  <img
+                    src={tech.avatar}
+                    alt={tech.name[lang]}
+                    referrerPolicy="no-referrer"
+                    className="w-16 h-16 rounded-2xl object-cover shrink-0 border border-slate-200 dark:border-slate-700 shadow-2xs"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                        {tech.name[lang]}
+                      </h3>
+                      {onViewReviews ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onViewReviews(
+                              tech.id,
+                              tech.name[lang],
+                              tech.craft[lang],
+                              tech.avatar,
+                              tech.rating,
+                              tech.reviewsCount
+                            )
+                          }
+                          className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors flex items-center gap-1 shrink-0 cursor-pointer bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-lg border border-amber-200/50 dark:border-amber-900/40"
+                          title={t.reviews}
+                        >
+                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                          <span>{tech.rating}</span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                            ({tech.reviewsCount})
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 shrink-0">
+                          ★ {tech.rating}
                         </span>
-                      </button>
-                    ) : (
-                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 shrink-0">
-                        ★ {tech.rating}
-                      </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 mt-0.5">
+                      {tech.craft[lang]}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                      <span>{tech.experienceYears} {lang === 'ar' ? 'سنة خبرة' : 'yrs exp'}</span>
+                      <span>·</span>
+                      <span>{tech.hourlyRate[lang]}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Availability Status */}
+                {!avail.isOpen ? (
+                  <div className="px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[11px] text-rose-800 dark:text-rose-200 space-y-0.5">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 shrink-0" />
+                      <span>{lang === 'ar' ? 'مغلق الآن' : 'Closed Now'}</span>
+                    </div>
+                    <div className="opacity-90">
+                      {avail.manualClosedReason || (lang === 'ar' ? avail.labelAr : avail.labelEn)}
+                    </div>
+                    {avail.scheduleTextAr && (
+                      <div className="font-mono tabular-nums opacity-80">
+                        {lang === 'ar' ? `مواعيد العمل: ${avail.scheduleTextAr}` : `Hours: ${avail.scheduleTextEn}`}
+                      </div>
                     )}
                   </div>
-                  <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 mt-0.5">
-                    {tech.craft[lang]}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                    <span>{tech.experienceYears} {lang === 'ar' ? 'سنة خبرة' : 'yrs exp'}</span>
-                    <span>·</span>
-                    <span>{tech.hourlyRate[lang]}</span>
+                ) : avail.scheduleTextAr ? (
+                  <div className="px-2.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/40 text-[11px] text-emerald-700 dark:text-emerald-300 flex items-center justify-between gap-2">
+                    <span className="font-bold flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 shrink-0" />
+                      {lang === 'ar' ? 'متاح الآن' : 'Available Now'}
+                    </span>
+                    <span className="font-mono tabular-nums">{lang === 'ar' ? avail.scheduleTextAr : avail.scheduleTextEn}</span>
                   </div>
+                ) : null}
+
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                  {tech.bio[lang]}
+                </p>
+
+                <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-1">
+                  <div className="flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>{tech.neighborhood[lang]}</span>
+                  </div>
+                  {onAddReview && (
+                    <button
+                      type="button"
+                      onClick={() => onAddReview(tech.id, tech.name[lang], tech.craft[lang])}
+                      className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold cursor-pointer"
+                    >
+                      + {t.addReview}
+                    </button>
+                  )}
                 </div>
               </div>
 
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
-                {tech.bio[lang]}
-              </p>
+              {/* Bottom Actions */}
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                <a
+                  href={`tel:${tech.phone}`}
+                  onClick={(e) => {
+                    if (!canUseServices) {
+                      e.preventDefault();
+                      onRequireLogin();
+                    }
+                  }}
+                  className="flex-1 py-2 px-2.5 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Phone className="w-3.5 h-3.5 text-amber-600" />
+                  <span>{t.callNow}</span>
+                </a>
 
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-1">
-                <div className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>{tech.neighborhood[lang]}</span>
-                </div>
-                {onAddReview && (
-                  <button
-                    type="button"
-                    onClick={() => onAddReview(tech.id, tech.name[lang], tech.craft[lang])}
-                    className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold cursor-pointer"
-                  >
-                    + {t.addReview}
-                  </button>
-                )}
+                <a
+                  href={`https://wa.me/${tech.whatsapp}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => {
+                    if (!canUseServices) {
+                      e.preventDefault();
+                      onRequireLogin();
+                    }
+                  }}
+                  className="flex-1 py-2 px-2.5 text-xs font-semibold rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{lang === 'ar' ? 'واتساب' : 'WhatsApp'}</span>
+                </a>
+
+                <button
+                  type="button"
+                  disabled={!avail.isOpen}
+                  onClick={() => avail.isOpen && onRequestTechnician(tech)}
+                  className={`flex-1 py-2 px-2.5 text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-1.5 ${
+                    avail.isOpen
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shadow-xs'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  {avail.isOpen ? <Calendar className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                  <span>
+                    {avail.isOpen
+                      ? lang === 'ar'
+                        ? 'طلب صيانة'
+                        : 'Request'
+                      : lang === 'ar'
+                      ? 'مغلق الآن'
+                      : 'Closed'}
+                  </span>
+                </button>
               </div>
             </div>
-
-            {/* Bottom Actions */}
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
-              <a
-                href={`tel:${tech.phone}`}
-                onClick={(e) => {
-                  if (!canUseServices) {
-                    e.preventDefault();
-                    onRequireLogin();
-                  }
-                }}
-                className="flex-1 py-2 px-2.5 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Phone className="w-3.5 h-3.5 text-amber-600" />
-                <span>{t.callNow}</span>
-              </a>
-
-              <a
-                href={`https://wa.me/${tech.whatsapp}`}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(e) => {
-                  if (!canUseServices) {
-                    e.preventDefault();
-                    onRequireLogin();
-                  }
-                }}
-                className="flex-1 py-2 px-2.5 text-xs font-semibold rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{lang === 'ar' ? 'واتساب' : 'WhatsApp'}</span>
-              </a>
-
-              <button
-                onClick={() => onRequestTechnician(tech)}
-                className="flex-1 py-2 px-2.5 text-xs font-semibold rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>{lang === 'ar' ? 'طلب صيانة' : 'Request'}</span>
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 };
+

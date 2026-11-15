@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import {
@@ -6,6 +6,7 @@ import {
   VillageAd,
   VillageConfig,
   PlatformPricingConfig,
+  AnalyticsEventType,
   getVillageTheme,
   isAdExpired
 } from '../../data/villageData';
@@ -37,6 +38,7 @@ interface AdsSectionProps {
   nowMs: number;
   canUseServices?: boolean;
   onRequireLogin: () => void;
+  onTrackEvent?: (type: AnalyticsEventType, targetId: string, targetLabel: string) => void;
 }
 
 export const AdsSection: React.FC<AdsSectionProps> = ({
@@ -53,10 +55,12 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
   adPricing,
   nowMs,
   canUseServices = false,
-  onRequireLogin
+  onRequireLogin,
+  onTrackEvent
 }) => {
   const t = TRANSLATIONS[lang];
   const theme = getVillageTheme(activeVillage?.colorCode);
+  const viewedAdsThisSessionRef = useRef<Set<string>>(new Set());
 
   const [spotlightIndex, setSpotlightIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -116,6 +120,14 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
 
   const safeSpotlightIndex = approvedAds.length > 0 ? spotlightIndex % approvedAds.length : 0;
   const featuredAd = approvedAds[safeSpotlightIndex];
+
+  useEffect(() => {
+    if (!featuredAd || !onTrackEvent) return;
+    const key = `${currentUserId || 'guest'}_${featuredAd.id}`;
+    if (viewedAdsThisSessionRef.current.has(key)) return;
+    viewedAdsThisSessionRef.current.add(key);
+    onTrackEvent('ad_view', featuredAd.id, featuredAd.title);
+  }, [featuredAd?.id, featuredAd?.title, currentUserId, onTrackEvent]);
 
   const handleOpenCreate = () => {
     if (!currentUserId || !canUseServices) {
@@ -199,12 +211,18 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
 
   const handlePrevSlide = () => {
     if (approvedAds.length <= 1) return;
-    setSpotlightIndex((prev) => (prev - 1 + approvedAds.length) % approvedAds.length);
+    const nextIdx = (spotlightIndex - 1 + approvedAds.length) % approvedAds.length;
+    setSpotlightIndex(nextIdx);
+    const nextAd = approvedAds[nextIdx];
+    if (nextAd) onTrackEvent?.('ad_click', nextAd.id, nextAd.title);
   };
 
   const handleNextSlide = () => {
     if (approvedAds.length <= 1) return;
-    setSpotlightIndex((prev) => (prev + 1) % approvedAds.length);
+    const nextIdx = (spotlightIndex + 1) % approvedAds.length;
+    setSpotlightIndex(nextIdx);
+    const nextAd = approvedAds[nextIdx];
+    if (nextAd) onTrackEvent?.('ad_click', nextAd.id, nextAd.title);
   };
 
   return (
@@ -292,6 +310,7 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
                     <a
                       href={`tel:${featuredAd.contactPhone}`}
                       onClick={(e) => {
+                        onTrackEvent?.('ad_click', featuredAd.id, featuredAd.title);
                         if (!canUseServices) {
                           e.preventDefault();
                           onRequireLogin();

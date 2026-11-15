@@ -25,6 +25,7 @@ import {
   UserProfile,
   BannedPhoneRecord,
   DemoTestAccount,
+  ServiceSectionConfig,
   TEST_DEMO_ACCOUNTS,
   normalizePhone,
   phoneToAuthEmail,
@@ -71,20 +72,12 @@ interface AuthModalProps {
   isBanned?: boolean;
   banReason?: string;
   banUntilMs?: number;
+  sections?: ServiceSectionConfig[];
   onProfileSaved: () => void;
   onOpenAdminPanel: () => void;
 }
 
-type ProviderCategory =
-  | 'doctor'
-  | 'technician'
-  | 'food'
-  | 'pharmacy'
-  | 'grocery'
-  | 'tutoring'
-  | 'charity'
-  | 'other'
-  | 'ride';
+type ProviderCategory = string;
 
 async function compressAvatarToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -130,6 +123,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   isBanned,
   banReason,
   banUntilMs,
+  sections,
   onProfileSaved,
   onOpenAdminPanel
 }) => {
@@ -1065,7 +1059,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const serviceCategories: { id: ProviderCategory; ar: string; en: string }[] = [
+  const defaultServiceCategories: { id: ProviderCategory; ar: string; en: string }[] = [
     { id: 'doctor', ar: 'دكتور / عيادة / تمريض', en: 'Doctor / Clinic / Nurse' },
     { id: 'pharmacy', ar: 'صيدلية / مستلزمات طبية', en: 'Pharmacy' },
     { id: 'food', ar: 'مطعم / كافيه / أكل بيتي / فرن', en: 'Restaurant / Cafe / Bakery' },
@@ -1076,6 +1070,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     { id: 'charity', ar: 'جمعية خيرية / تكافل', en: 'Charitable Organization' },
     { id: 'other', ar: 'أخرى (أي نشاط أو خدمة مش موجودة)', en: 'Other Activities & Services' }
   ];
+
+  const serviceCategories: { id: ProviderCategory; ar: string; en: string }[] =
+    sections && sections.length > 0
+      ? sections
+          .filter((s) => s.isEnabled !== false)
+          .slice()
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+          .map((s) => ({
+            id: s.providerCategoryId || s.id,
+            ar: s.nameAr,
+            en: s.nameEn
+          }))
+      : defaultServiceCategories;
 
   const displayAvatar = photoUrl || '';
   const effectiveProfile = activeDemoAccount || userProfile;

@@ -13,6 +13,7 @@ import {
   where,
   setDoc,
   updateDoc,
+  deleteDoc,
   serverTimestamp
 } from 'firebase/firestore';
 import {
@@ -30,6 +31,7 @@ import {
   UserProfile,
   BannedPhoneRecord,
   PlatformPricingConfig,
+  ProviderAvailabilityConfig,
   ProviderListing,
   VillageAd,
   DoctorService,
@@ -67,7 +69,12 @@ import {
   TEST_DEMO_BOOKINGS,
   normalizePhone,
   isBanCurrentlyActive,
-  getServiceStatusLabel
+  getServiceStatusLabel,
+  evaluateProviderAvailability,
+  ServiceSectionConfig,
+  DEFAULT_SERVICE_SECTIONS,
+  AnalyticsEventRecord,
+  AnalyticsEventType
 } from './data/villageData';
 import { TRANSLATIONS } from './data/translations';
 
@@ -98,6 +105,7 @@ import { OrderStatusModal } from './components/Modals/OrderStatusModal';
 import { ProviderOrdersModal } from './components/Modals/ProviderOrdersModal';
 import { PaymentPage } from './components/PaymentPage';
 import { ProviderWorkspace } from './components/ProviderWorkspace';
+import { AdminWorkspace } from './components/AdminWorkspace';
 
 import { Briefcase, AlertCircle, Ban, Phone } from 'lucide-react';
 
@@ -130,6 +138,16 @@ export default function App() {
   const [demoProviderStatusMap, setDemoProviderStatusMap] = useState<
     Record<string, 'approved' | 'pending' | 'rejected'>
   >({});
+  const [demoProviderAvailabilityMap, setDemoProviderAvailabilityMap] = useState<
+    Record<string, ProviderAvailabilityConfig>
+  >(() => {
+    try {
+      const saved = window.localStorage.getItem('noqbas_demo_provider_availability');
+      return saved ? (JSON.parse(saved) as Record<string, ProviderAvailabilityConfig>) : {};
+    } catch {
+      return {};
+    }
+  });
 
   // Single Village (قرية نقباس) + Platform Pricing State
   const [activeVillage, setActiveVillage] = useState<VillageConfig>(DEFAULT_VILLAGES[0]);
@@ -146,6 +164,37 @@ export default function App() {
   const [firestoreReviews, setFirestoreReviews] = useState<ReviewItem[]>([]);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [bannedPhones, setBannedPhones] = useState<BannedPhoneRecord[]>([]);
+
+  // Dynamic Service Sections & Admin Overrides State
+  const [firestoreSections, setFirestoreSections] = useState<ServiceSectionConfig[]>([]);
+  const [localSectionsOverride, setLocalSectionsOverride] = useState<Record<string, ServiceSectionConfig>>(() => {
+    try {
+      const saved = window.localStorage.getItem('noqbas_custom_sections');
+      return saved ? (JSON.parse(saved) as Record<string, ServiceSectionConfig>) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [deletedSectionIds, setDeletedSectionIds] = useState<string[]>(() => {
+    try {
+      const saved = window.localStorage.getItem('noqbas_deleted_sections');
+      return saved ? (JSON.parse(saved) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [editedAdsMap, setEditedAdsMap] = useState<Record<string, VillageAd>>({});
+  const [deletedAdIds, setDeletedAdIds] = useState<string[]>([]);
+
+  // Platform Telemetry & Views Tracking State
+  const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEventRecord[]>(() => {
+    try {
+      const saved = window.localStorage.getItem('noqbas_analytics_events');
+      return saved ? (JSON.parse(saved) as AnalyticsEventRecord[]) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Village Base Data State
   const [localDoctors, setLocalDoctors] = useState<DoctorService[]>(VILLAGE_DOCTORS);
@@ -616,6 +665,56 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  // 6b. Dynamic Service Sections Listener (Public Read)
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'sections'),
+      (snap) => {
+        const mapped = snap.docs.map((d) => ({
+          ...(d.data() as ServiceSectionConfig),
+          id: d.id
+        }));
+        setFirestoreSections(mapped);
+      },
+      (err) => console.warn('Sections listener warning:', err.message)
+    );
+    return () => unsub();
+  }, []);
+
+  // 6c. Platform Analytics & Views Events Listener (Admin sees all, users see own)
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const eventsSource = isAdmin
+      ? collection(db, 'analyticsEvents')
+      : query(collection(db, 'analyticsEvents'), where('ownerId', '==', firebaseUser.uid));
+
+    const unsub = onSnapshot(
+      eventsSource,
+      (snap) => {
+        const remote = snap.docs.map((d) => {
+          const data = d.data() as AnalyticsEventRecord;
+          return {
+            ...data,
+            id: d.id,
+            createdAtMs: typeof data.createdAtMs === 'number' ? data.createdAtMs : Date.now()
+          };
+        });
+        setAnalyticsEvents((prev) => {
+          const map = new Map<string, AnalyticsEventRecord>();
+          remote.forEach((ev) => map.set(ev.id, ev));
+          prev.forEach((ev) => {
+            if (!map.has(ev.id)) map.set(ev.id, ev);
+          });
+          return Array.from(map.values())
+            .sort((a, b) => b.createdAtMs - a.createdAtMs)
+            .slice(0, 600);
+        });
+      },
+      (err) => console.warn('Analytics events listener warning:', err.message)
+    );
+    return () => unsub();
+  }, [isAdmin, firebaseUser?.uid]);
+
   // 7. User Bookings Listener (when signed in via Firebase or Test Account)
   useEffect(() => {
     if (!effectiveUid) {
@@ -768,8 +867,11 @@ export default function App() {
       if (deletedDemoUids.includes(p.ownerId)) return;
       if (!map.has(p.id)) {
         const patch = demoProfilePatch[p.ownerId] || {};
+        const availPatch =
+          demoProviderAvailabilityMap[p.id] || demoProviderAvailabilityMap[p.ownerId] || {};
         map.set(p.id, {
           ...p,
+          ...availPatch,
           nameAr: patch.displayName || p.nameAr,
           nameEn: patch.displayName || p.nameEn,
           status: demoProviderStatusMap[p.id] || p.status
@@ -777,7 +879,13 @@ export default function App() {
       }
     });
     return Array.from(map.values());
-  }, [firestoreProviders, deletedDemoUids, demoProfilePatch, demoProviderStatusMap]);
+  }, [
+    firestoreProviders,
+    deletedDemoUids,
+    demoProfilePatch,
+    demoProviderStatusMap,
+    demoProviderAvailabilityMap
+  ]);
 
   const mergedBannedPhones = useMemo<BannedPhoneRecord[]>(() => {
     const map = new Map<string, BannedPhoneRecord>();
@@ -833,6 +941,64 @@ export default function App() {
     setDemoProviderStatusMap((prev) => ({ ...prev, [providerId]: decision }));
   };
 
+  // Service Provider: Toggle Open/Closed or Update Working Hours & Days
+  const handleUpdateProviderAvailability = async (availability: ProviderAvailabilityConfig) => {
+    const validTime = (val?: string, fallback = '09:00') =>
+      val && /^([01]\d|2[0-3]):[0-5]\d$/.test(val.trim()) ? val.trim() : fallback;
+
+    const cleanConfig: ProviderAvailabilityConfig = {
+      isAcceptingOrders: availability.isAcceptingOrders !== false,
+      manualClosedReason: (availability.manualClosedReason || '').trim().slice(0, 120),
+      scheduleEnabled: Boolean(availability.scheduleEnabled),
+      openTime: validTime(availability.openTime, '09:00'),
+      closeTime: validTime(availability.closeTime, '22:00'),
+      workingDays: Array.isArray(availability.workingDays)
+        ? Array.from(
+            new Set(
+              availability.workingDays.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+            )
+          )
+        : [6, 0, 1, 2, 3, 4]
+    };
+
+    if (activeDemoAccount || !firebaseUser) {
+      const targetKey = activeProviderListing?.id || effectiveUid || '';
+      if (!targetKey) return;
+      setDemoProviderAvailabilityMap((prev) => {
+        const next: Record<string, ProviderAvailabilityConfig> = {
+          ...prev,
+          [targetKey]: cleanConfig
+        };
+        if (effectiveUid) next[effectiveUid] = cleanConfig;
+        try {
+          window.localStorage.setItem('noqbas_demo_provider_availability', JSON.stringify(next));
+        } catch {
+          // Ignore storage quota errors
+        }
+        return next;
+      });
+      return;
+    }
+
+    const providerDocId = activeProviderListing?.id || firebaseUser.uid;
+    setFirestoreProviders((prev) =>
+      prev.map((p) => (p.id === providerDocId ? { ...p, ...cleanConfig } : p))
+    );
+    try {
+      await updateDoc(doc(db, 'providers', providerDocId), {
+        isAcceptingOrders: cleanConfig.isAcceptingOrders,
+        manualClosedReason: cleanConfig.manualClosedReason,
+        scheduleEnabled: cleanConfig.scheduleEnabled,
+        openTime: cleanConfig.openTime,
+        closeTime: cleanConfig.closeTime,
+        workingDays: cleanConfig.workingDays,
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `providers/${providerDocId}`);
+    }
+  };
+
   // Merge Firestore reviews + Initial reviews
   const reviews = useMemo(() => {
     const map = new Map<string, ReviewItem>();
@@ -848,6 +1014,15 @@ export default function App() {
     () => mergedProviders.filter((p) => p.status === 'approved'),
     [mergedProviders]
   );
+
+  const toAvailability = (p: ProviderListing): ProviderAvailabilityConfig => ({
+    isAcceptingOrders: p.isAcceptingOrders,
+    manualClosedReason: p.manualClosedReason,
+    scheduleEnabled: p.scheduleEnabled,
+    openTime: p.openTime,
+    closeTime: p.closeTime,
+    workingDays: p.workingDays
+  });
 
   const allDoctors = useMemo<DoctorService[]>(() => {
     const customDocs: DoctorService[] = approvedProviders
@@ -866,7 +1041,8 @@ export default function App() {
         availableDays: { ar: 'مواعيد يومية بالحجز', en: 'Daily by appointment' },
         fee: { ar: p.priceLabelAr || '100 ج.م', en: p.priceLabelEn || '100 EGP' },
         supportsHomeVisit: true,
-        avatar: '/src/assets/images/doctor_marcus_vance_1794474296129.jpg'
+        avatar: '/src/assets/images/doctor_marcus_vance_1794474296129.jpg',
+        availability: toAvailability(p)
       }));
     return [...customDocs, ...localDoctors];
   }, [approvedProviders, localDoctors]);
@@ -889,7 +1065,8 @@ export default function App() {
         hourlyRate: { ar: p.priceLabelAr || '70 ج.م / زيارة', en: p.priceLabelEn || '70 EGP / Visit' },
         neighborhood: { ar: p.neighborhoodAr || 'وسط البلد', en: p.neighborhoodEn || 'Village Center' },
         avatar: '/src/assets/images/village_technician_electrician_1794475355366.jpg',
-        bio: { ar: p.bioAr || p.specialtyAr, en: p.bioEn || p.specialtyEn }
+        bio: { ar: p.bioAr || p.specialtyAr, en: p.bioEn || p.specialtyEn },
+        availability: toAvailability(p)
       }));
     return [...customTechs, ...localTechnicians];
   }, [approvedProviders, localTechnicians]);
@@ -909,7 +1086,8 @@ export default function App() {
           currency: { ar: 'ج.م', en: 'EGP' },
           category: 'traditional',
           restaurantName: { ar: p.nameAr, en: p.nameEn },
-          image: '/src/assets/images/village_fresh_food_bakery_1794475356032.jpg'
+          image: '/src/assets/images/village_fresh_food_bakery_1794475356032.jpg',
+          availability: toAvailability(p)
         };
       });
     return [...customFoods, ...VILLAGE_FOOD_ITEMS];
@@ -930,7 +1108,8 @@ export default function App() {
           price: numeric,
           currency: { ar: 'ج.م', en: 'EGP' },
           inStock: true,
-          requiresPrescription: false
+          requiresPrescription: false,
+          availability: toAvailability(p)
         };
       });
     return [...customPh, ...VILLAGE_PHARMACY_ITEMS];
@@ -951,7 +1130,8 @@ export default function App() {
           category: 'staples',
           price: numeric,
           unit: { ar: 'طلب / وحدة', en: '1 Unit' },
-          currency: { ar: 'ج.م', en: 'EGP' }
+          currency: { ar: 'ج.م', en: 'EGP' },
+          availability: toAvailability(p)
         };
       });
     return [...customGrocery, ...VILLAGE_GROCERY_ITEMS];
@@ -972,7 +1152,8 @@ export default function App() {
         schedule: { ar: 'مواعيد مرنة بالحجز', en: 'Flexible Schedule' },
         location: { ar: p.neighborhoodAr || 'وسط البلد', en: p.neighborhoodEn || 'Village Center' },
         phone: p.phone,
-        mode: { ar: p.bioAr || 'مجموعات أو دروس خاصة', en: p.bioEn || 'Small groups or private' }
+        mode: { ar: p.bioAr || 'مجموعات أو دروس خاصة', en: p.bioEn || 'Small groups or private' },
+        availability: toAvailability(p)
       }));
     return [...customTutors, ...VILLAGE_TUTORING_SERVICES];
   }, [approvedProviders]);
@@ -989,7 +1170,8 @@ export default function App() {
         activeCampaign: { ar: p.bioAr || p.specialtyAr, en: p.bioEn || p.specialtyEn },
         address: { ar: p.neighborhoodAr || 'وسط البلد', en: p.neighborhoodEn || 'Village Center' },
         phone: p.phone,
-        donationExample: { ar: p.priceLabelAr || 'مساهمة مفتوحة أو تطوع', en: p.priceLabelEn || 'Any contribution or volunteer' }
+        donationExample: { ar: p.priceLabelAr || 'مساهمة مفتوحة أو تطوع', en: p.priceLabelEn || 'Any contribution or volunteer' },
+        availability: toAvailability(p)
       }));
     return [...customCharities, ...VILLAGE_CHARITIES];
   }, [approvedProviders]);
@@ -1008,7 +1190,8 @@ export default function App() {
         availableSeats: 3,
         pricePerSeat: { ar: p.priceLabelAr || '25 ج.م', en: p.priceLabelEn || '25 EGP' },
         carModel: p.bioAr || 'سيارة ملاكي',
-        phone: p.phone
+        phone: p.phone,
+        availability: toAvailability(p)
       }));
     return [...customRides, ...VILLAGE_RIDES];
   }, [approvedProviders]);
@@ -1026,20 +1209,358 @@ export default function App() {
         address: { ar: p.neighborhoodAr || 'وسط البلد', en: p.neighborhoodEn || 'Village Center' },
         priceLabel: { ar: p.priceLabelAr || 'حسب الاتفاق', en: p.priceLabelEn || 'By agreement' },
         hours: { ar: 'يومياً حسب الاتفاق', en: 'Daily by appointment' },
-        phone: p.phone
+        phone: p.phone,
+        availability: toAvailability(p)
       }));
     return [...customOthers, ...VILLAGE_OTHER_SERVICES];
   }, [approvedProviders]);
 
-  // Merge Firestore Ads + Seed Ads
+  // Merge Default + Firestore + Local Service Sections
+  const mergedSections = useMemo<ServiceSectionConfig[]>(() => {
+    const map = new Map<string, ServiceSectionConfig>();
+    DEFAULT_SERVICE_SECTIONS.forEach((sec) => map.set(sec.id, sec));
+    firestoreSections.forEach((sec) => map.set(sec.id, sec));
+    Object.values(localSectionsOverride).forEach((sec) => map.set(sec.id, sec));
+    deletedSectionIds.forEach((delId) => {
+      const target = map.get(delId);
+      if (target && !target.isBuiltIn) {
+        map.delete(delId);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [firestoreSections, localSectionsOverride, deletedSectionIds]);
+
+  const isSectionEnabled = (sectionId: string): boolean => {
+    const found = mergedSections.find((s) => s.id === sectionId);
+    return found ? found.isEnabled !== false : true;
+  };
+
+  // Telemetry Tracker (Views, Ad Browsing, Provider Engagement)
+  const trackAnalyticsEvent = async (
+    eventType: AnalyticsEventType,
+    targetId: string,
+    targetLabel: string
+  ) => {
+    if (isAdmin) return;
+    const evt: AnalyticsEventRecord = {
+      id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      ownerId: effectiveUid || 'guest',
+      userName:
+        effectiveProfile?.displayName ||
+        firebaseUser?.displayName ||
+        (lang === 'ar' ? 'زائر قرية نقباس' : 'Noqbas Visitor'),
+      userPhone: effectiveProfile?.phone || '',
+      userRole:
+        effectiveProfile?.role === 'provider'
+          ? 'provider'
+          : effectiveUid
+          ? 'resident'
+          : 'guest',
+      eventType,
+      targetId: targetId.slice(0, 80),
+      targetLabel: targetLabel.slice(0, 120),
+      villageId: 'noqbas',
+      createdAtMs: Date.now()
+    };
+
+    setAnalyticsEvents((prev) => {
+      const next = [evt, ...prev].slice(0, 500);
+      try {
+        window.localStorage.setItem('noqbas_analytics_events', JSON.stringify(next));
+      } catch {
+        // Ignore storage quota errors
+      }
+      return next;
+    });
+
+    if (firebaseUser && !isCurrentUserBanned && (firebaseUser.emailVerified || firebaseUser.phoneNumber)) {
+      try {
+        await setDoc(doc(db, 'analyticsEvents', evt.id), {
+          ...evt,
+          ownerId: firebaseUser.uid,
+          createdAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.warn('Analytics event save warning:', err);
+      }
+    }
+  };
+
+  // Admin: Sections CRUD Handlers
+  const handleSaveSection = async (section: ServiceSectionConfig) => {
+    const cleanSection: ServiceSectionConfig = {
+      ...section,
+      id: section.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40),
+      providerCategoryId: (section.providerCategoryId || section.id)
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 40),
+      nameAr: section.nameAr.trim().slice(0, 60),
+      nameEn: section.nameEn.trim().slice(0, 60),
+      descriptionAr: (section.descriptionAr || '').trim().slice(0, 160),
+      descriptionEn: (section.descriptionEn || '').trim().slice(0, 160),
+      sortOrder: Number.isFinite(Number(section.sortOrder)) ? Number(section.sortOrder) : 99,
+      isEnabled: section.isEnabled !== false
+    };
+
+    setDeletedSectionIds((prev) => {
+      const next = prev.filter((id) => id !== cleanSection.id);
+      try {
+        window.localStorage.setItem('noqbas_deleted_sections', JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+
+    setLocalSectionsOverride((prev) => {
+      const next = { ...prev, [cleanSection.id]: cleanSection };
+      try {
+        window.localStorage.setItem('noqbas_custom_sections', JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+
+    if (firebaseUser && isAdmin) {
+      try {
+        await setDoc(doc(db, 'sections', cleanSection.id), {
+          ...cleanSection,
+          updatedAt: serverTimestamp()
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `sections/${cleanSection.id}`);
+      }
+    }
+  };
+
+  const handleDeleteSection = async (sectionId: string) => {
+    const target = mergedSections.find((s) => s.id === sectionId);
+    if (target?.isBuiltIn) {
+      await handleSaveSection({ ...target, isEnabled: false });
+      return;
+    }
+
+    setLocalSectionsOverride((prev) => {
+      const next = { ...prev };
+      delete next[sectionId];
+      try {
+        window.localStorage.setItem('noqbas_custom_sections', JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+
+    setDeletedSectionIds((prev) => {
+      const next = prev.includes(sectionId) ? prev : [...prev, sectionId];
+      try {
+        window.localStorage.setItem('noqbas_deleted_sections', JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+
+    if (firebaseUser && isAdmin) {
+      try {
+        await deleteDoc(doc(db, 'sections', sectionId));
+      } catch (err) {
+        console.warn('Section delete warning:', err);
+      }
+    }
+  };
+
+  const handleResetSections = async () => {
+    setLocalSectionsOverride({});
+    setDeletedSectionIds([]);
+    try {
+      window.localStorage.removeItem('noqbas_custom_sections');
+      window.localStorage.removeItem('noqbas_deleted_sections');
+    } catch {
+      // Ignore storage errors
+    }
+
+    if (firebaseUser && isAdmin) {
+      for (const sec of firestoreSections) {
+        try {
+          if (sec.isBuiltIn) {
+            const def = DEFAULT_SERVICE_SECTIONS.find((d) => d.id === sec.id);
+            if (def) {
+              await setDoc(doc(db, 'sections', sec.id), {
+                ...def,
+                updatedAt: serverTimestamp()
+              });
+            }
+          } else {
+            await deleteDoc(doc(db, 'sections', sec.id));
+          }
+        } catch (err) {
+          console.warn('Reset section warning:', err);
+        }
+      }
+    }
+  };
+
+  // Admin: Direct Ad Create / Edit / Delete
+  const handleAdminSaveAd = async (
+    adId: string,
+    payload: Partial<VillageAd> & {
+      title: string;
+      description: string;
+      category: VillageAd['category'];
+      contactPhone: string;
+    },
+    isNew?: boolean
+  ) => {
+    const existing = allAds.find((a) => a.id === adId);
+    const now = Date.now();
+    const durationPlan = payload.durationPlan || existing?.durationPlan || 'month';
+    const durationDays =
+      typeof payload.durationDays === 'number'
+        ? payload.durationDays
+        : durationPlan === 'week'
+        ? 7
+        : 30;
+    const savedAd: VillageAd = {
+      id: adId,
+      ownerId: existing?.ownerId || firebaseUser?.uid || 'admin',
+      authorName: existing?.authorName || payload.authorName || 'إدارة قرية نقباس',
+      villageId: 'noqbas',
+      title: payload.title.trim().slice(0, 120),
+      description: payload.description.trim().slice(0, 600),
+      category: payload.category,
+      contactPhone: payload.contactPhone.trim().slice(0, 30),
+      priceText: (payload.priceText ?? existing?.priceText ?? '').trim().slice(0, 60),
+      durationPlan,
+      durationDays,
+      costEgp: typeof payload.costEgp === 'number' ? payload.costEgp : existing?.costEgp ?? 0,
+      status: payload.status || existing?.status || 'approved',
+      createdDate: existing?.createdDate || new Date().toISOString().split('T')[0],
+      expiresAtMs:
+        typeof payload.expiresAtMs === 'number'
+          ? payload.expiresAtMs
+          : existing?.expiresAtMs || now + durationDays * 24 * 60 * 60 * 1000
+    };
+
+    setDeletedAdIds((prev) => prev.filter((id) => id !== adId));
+    setEditedAdsMap((prev) => ({ ...prev, [adId]: savedAd }));
+    setFirestoreAds((prev) => {
+      const existsInRemote = prev.some((a) => a.id === adId);
+      if (existsInRemote) return prev.map((a) => (a.id === adId ? savedAd : a));
+      return isNew ? [savedAd, ...prev] : prev;
+    });
+
+    if (firebaseUser && isAdmin) {
+      try {
+        await setDoc(
+          doc(db, 'ads', adId),
+          {
+            ...savedAd,
+            updatedAt: serverTimestamp()
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `ads/${adId}`);
+      }
+    }
+  };
+
+  const handleAdminDeleteAd = async (adId: string) => {
+    setDeletedAdIds((prev) => (prev.includes(adId) ? prev : [...prev, adId]));
+    setEditedAdsMap((prev) => {
+      const next = { ...prev };
+      delete next[adId];
+      return next;
+    });
+    setFirestoreAds((prev) => prev.filter((a) => a.id !== adId));
+
+    if (firebaseUser && isAdmin) {
+      try {
+        await deleteDoc(doc(db, 'ads', adId));
+      } catch (err) {
+        console.warn('Admin delete ad warning:', err);
+      }
+    }
+  };
+
+  // Admin: Toggle Provider Open/Closed or Delete Provider
+  const handleAdminToggleProviderOpen = async (
+    provider: ProviderListing,
+    isAcceptingOrders: boolean
+  ) => {
+    const manualClosedReason = isAcceptingOrders ? '' : 'مغلق مؤقتاً من إدارة المنصة';
+    if (provider.id.startsWith('test-')) {
+      setDemoProviderAvailabilityMap((prev) => {
+        const existing = prev[provider.id] || prev[provider.ownerId] || {};
+        const updated: ProviderAvailabilityConfig = {
+          ...existing,
+          isAcceptingOrders,
+          manualClosedReason
+        };
+        const next = {
+          ...prev,
+          [provider.id]: updated,
+          [provider.ownerId]: updated
+        };
+        try {
+          window.localStorage.setItem('noqbas_demo_provider_availability', JSON.stringify(next));
+        } catch {
+          // Ignore storage errors
+        }
+        return next;
+      });
+      return;
+    }
+
+    setFirestoreProviders((prev) =>
+      prev.map((p) =>
+        p.id === provider.id ? { ...p, isAcceptingOrders, manualClosedReason } : p
+      )
+    );
+    if (firebaseUser && isAdmin) {
+      try {
+        await updateDoc(doc(db, 'providers', provider.id), {
+          isAcceptingOrders,
+          manualClosedReason,
+          updatedAt: serverTimestamp()
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `providers/${provider.id}`);
+      }
+    }
+  };
+
+  const handleAdminDeleteProvider = async (provider: ProviderListing) => {
+    if (provider.id.startsWith('test-') || provider.ownerId.startsWith('test-')) {
+      setDeletedDemoUids((prev) =>
+        prev.includes(provider.ownerId) ? prev : [...prev, provider.ownerId]
+      );
+      return;
+    }
+    setFirestoreProviders((prev) => prev.filter((p) => p.id !== provider.id));
+    if (firebaseUser && isAdmin) {
+      try {
+        await deleteDoc(doc(db, 'providers', provider.id));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `providers/${provider.id}`);
+      }
+    }
+  };
+
+  // Merge Firestore Ads + Seed Ads + Admin Edits
   const allAds = useMemo<VillageAd[]>(() => {
     const map = new Map<string, VillageAd>();
     firestoreAds.forEach((a) => map.set(a.id, a));
     INITIAL_VILLAGE_ADS.forEach((a) => {
       if (!map.has(a.id)) map.set(a.id, a);
     });
+    Object.values(editedAdsMap).forEach((a) => map.set(a.id, a));
+    deletedAdIds.forEach((id) => map.delete(id));
     return Array.from(map.values());
-  }, [firestoreAds]);
+  }, [firestoreAds, editedAdsMap, deletedAdIds]);
 
   const pendingAdminCount = useMemo(
     () =>
@@ -1513,6 +2034,7 @@ export default function App() {
     rating: number,
     reviewsCount: number
   ) => {
+    trackAnalyticsEvent('provider_view', targetId, name);
     setActiveReviewTarget({
       id: targetId,
       name,
@@ -1664,6 +2186,19 @@ export default function App() {
     providerName?: string;
     providerOwnerId?: string;
   }) => {
+    if (item.providerOwnerId) {
+      const ownerListing = mergedProviders.find(
+        (p) => p.ownerId === item.providerOwnerId || p.id === item.providerOwnerId
+      );
+      if (ownerListing && !evaluateProviderAvailability(ownerListing, nowMs).isOpen) {
+        return;
+      }
+    }
+    trackAnalyticsEvent(
+      'provider_view',
+      item.providerOwnerId || item.id,
+      item.providerName || item.name
+    );
     requireAuth(() => {
       updateCartStateAndStorage((prev) => {
         const existing = prev.find((i) => i.id === item.id);
@@ -1768,6 +2303,8 @@ export default function App() {
   };
 
   const handleOpenDoctorBooking = (docItem: DoctorService) => {
+    if (!evaluateProviderAvailability(docItem.availability, nowMs).isOpen) return;
+    trackAnalyticsEvent('provider_view', docItem.ownerId || docItem.id, docItem.name[lang]);
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'doctor',
@@ -1781,6 +2318,8 @@ export default function App() {
   };
 
   const handleOpenTechnicianBooking = (tech: TechnicianService) => {
+    if (!evaluateProviderAvailability(tech.availability, nowMs).isOpen) return;
+    trackAnalyticsEvent('provider_view', tech.ownerId || tech.id, tech.name[lang]);
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'technician',
@@ -1794,6 +2333,8 @@ export default function App() {
   };
 
   const handleOpenRideBooking = (ride: VillageRide) => {
+    if (!evaluateProviderAvailability(ride.availability, nowMs).isOpen) return;
+    trackAnalyticsEvent('provider_view', ride.ownerId || ride.id, ride.driverName[lang]);
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'ride',
@@ -1807,6 +2348,8 @@ export default function App() {
   };
 
   const handleOpenTutorBooking = (tutor: TutoringService) => {
+    if (!evaluateProviderAvailability(tutor.availability, nowMs).isOpen) return;
+    trackAnalyticsEvent('provider_view', tutor.ownerId || tutor.id, tutor.teacherName[lang]);
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'tutoring',
@@ -1820,6 +2363,8 @@ export default function App() {
   };
 
   const handleOpenCharityContact = (org: CharityOrg) => {
+    if (!evaluateProviderAvailability(org.availability, nowMs).isOpen) return;
+    trackAnalyticsEvent('provider_view', org.ownerId || org.id, org.name[lang]);
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'charity',
@@ -1833,6 +2378,8 @@ export default function App() {
   };
 
   const handleOpenOtherBooking = (svc: OtherService) => {
+    if (!evaluateProviderAvailability(svc.availability, nowMs).isOpen) return;
+    trackAnalyticsEvent('provider_view', svc.ownerId || svc.id, svc.name[lang]);
     guardBannedOrOpenBooking(() => {
       setBookingDetails({
         type: 'other',
@@ -1974,6 +2521,76 @@ export default function App() {
     );
   }
 
+  // Completely Separate Admin Portal (Shows ONLY Analytics, Platform Controls, Sections, Ads, Providers & Reports)
+  if (isAdmin) {
+    return (
+      <>
+        <AdminWorkspace
+          lang={lang}
+          onToggleLang={() => setLang(lang === 'ar' ? 'en' : 'ar')}
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode(!darkMode)}
+          activeVillage={activeVillage}
+          adminProfile={effectiveProfile}
+          providers={mergedProviders}
+          ads={allAds}
+          users={mergedUsers}
+          bannedPhones={mergedBannedPhones}
+          bookings={bookings}
+          reviews={reviews}
+          sections={mergedSections}
+          analyticsEvents={analyticsEvents}
+          adPricing={adPricing}
+          nowMs={nowMs}
+          notificationsCount={unreadNotificationsCount}
+          onOpenNotifications={() => setIsNotificationsOpen(true)}
+          onOpenAuth={() => openAuthModal('login')}
+          onVillageUpdated={(updated) => setActiveVillage(updated)}
+          onDemoUserAction={handleDemoUserAction}
+          onDemoProviderDecision={handleDemoProviderDecision}
+          onAdminToggleProviderOpen={handleAdminToggleProviderOpen}
+          onAdminDeleteProvider={handleAdminDeleteProvider}
+          onSaveSection={handleSaveSection}
+          onDeleteSection={handleDeleteSection}
+          onResetSections={handleResetSections}
+          onAdminSaveAd={handleAdminSaveAd}
+          onAdminDeleteAd={handleAdminDeleteAd}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+          onVerifyInstaPayPayment={handleVerifyInstaPayPayment}
+          onAssignOrderProvider={handleAssignOrderProvider}
+          onSettleOrders={handleSettleOrders}
+          onCommissionRateChange={handleCommissionRateChange}
+        />
+
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          lang={lang}
+          initialMode={authModalMode}
+          firebaseUser={firebaseUser}
+          userProfile={userProfile}
+          activeDemoAccount={activeDemoAccount}
+          onLoginDemoAccount={handleLoginDemoAccount}
+          onLogoutDemoAccount={handleLogoutDemoAccount}
+          isAdmin={isAdmin}
+          isBanned={false}
+          sections={mergedSections}
+          onProfileSaved={() => {}}
+          onOpenAdminPanel={() => setIsAuthModalOpen(false)}
+        />
+
+        <NotificationsModal
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          notifications={userNotifications}
+          seenIds={seenNotificationIds}
+          onMarkAllRead={handleMarkAllNotificationsRead}
+          lang={lang}
+        />
+      </>
+    );
+  }
+
   // Completely Separate Service Provider Portal (Shows ONLY activity status & order details)
   if (isProviderMode && effectiveProfile) {
     return (
@@ -1994,6 +2611,8 @@ export default function App() {
           banReason={ownPhoneBan?.reason || effectiveProfile.banReason}
           banUntilMs={ownPhoneBan?.banUntilMs || effectiveProfile.banUntilMs}
           onUpdateOrderStatus={handleUpdateOrderStatus}
+          onUpdateAvailability={handleUpdateProviderAvailability}
+          nowMs={nowMs}
           onOpenNotifications={() => setIsNotificationsOpen(true)}
           onOpenAuth={() => openAuthModal('login')}
         />
@@ -2012,6 +2631,7 @@ export default function App() {
           isBanned={isCurrentUserBanned}
           banReason={ownPhoneBan?.reason || effectiveProfile.banReason}
           banUntilMs={ownPhoneBan?.banUntilMs || effectiveProfile.banUntilMs}
+          sections={mergedSections}
           onProfileSaved={() => {}}
           onOpenAdminPanel={() => setIsAdminModalOpen(true)}
         />
@@ -2037,9 +2657,18 @@ export default function App() {
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         activeTab={activeTab}
+        sections={mergedSections}
         onTabChange={(tab) => {
           setActiveTab(tab);
           setSearchQuery('');
+          if (tab !== 'all') {
+            const sec = mergedSections.find((s) => s.id === tab);
+            trackAnalyticsEvent(
+              'section_view',
+              tab,
+              sec ? (lang === 'ar' ? sec.nameAr : sec.nameEn) : tab
+            );
+          }
         }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -2075,6 +2704,14 @@ export default function App() {
           onSelectCategory={(cat) => {
             setActiveTab(cat);
             setSearchQuery('');
+            if (cat !== 'all') {
+              const sec = mergedSections.find((s) => s.id === cat);
+              trackAnalyticsEvent(
+                'section_view',
+                cat,
+                sec ? (lang === 'ar' ? sec.nameAr : sec.nameEn) : cat
+              );
+            }
           }}
           activeVillage={activeVillage}
           heroAdsSlot={
@@ -2093,6 +2730,7 @@ export default function App() {
               nowMs={nowMs}
               canUseServices={canUsePlatformServices}
               onRequireLogin={() => openAuthModal('login')}
+              onTrackEvent={trackAnalyticsEvent}
             />
           }
         />
@@ -2190,14 +2828,15 @@ export default function App() {
           </div>
         )}
 
-        {/* SECTION ROUTING (10 Core Sections - Free to browse, login required on action) */}
+        {/* SECTION ROUTING (Dynamic Sections - Built-in + Admin Custom Sections) */}
 
-        {(activeTab === 'all' || activeTab === 'doctors') && (
+        {(activeTab === 'all' || activeTab === 'doctors') && isSectionEnabled('doctors') && (
           filteredDoctors.length > 0 ? (
             <DoctorsSection
               doctors={filteredDoctors}
               lang={lang}
               canUseServices={canUsePlatformServices}
+              nowMs={nowMs}
               onRequireLogin={() => openAuthModal('login')}
               onBookDoctor={handleOpenDoctorBooking}
               onViewReviews={handleOpenReviewsModal}
@@ -2220,33 +2859,36 @@ export default function App() {
           ) : null
         )}
 
-        {(activeTab === 'all' || activeTab === 'pharmacy') && filteredPharmacy.length > 0 && (
+        {(activeTab === 'all' || activeTab === 'pharmacy') && isSectionEnabled('pharmacy') && filteredPharmacy.length > 0 && (
           <PharmacySection
             items={filteredPharmacy}
             lang={lang}
             canUseServices={canUsePlatformServices}
+            nowMs={nowMs}
             onRequireLogin={() => openAuthModal('login')}
             onAddToCart={handleAddToCart}
             onOpenUploadPrescription={() => requireAuth(() => setIsPrescriptionModalOpen(true))}
           />
         )}
 
-        {(activeTab === 'all' || activeTab === 'food') && filteredFoods.length > 0 && (
+        {(activeTab === 'all' || activeTab === 'food') && isSectionEnabled('food') && filteredFoods.length > 0 && (
           <FoodSection
             foods={filteredFoods}
             lang={lang}
             canUseServices={canUsePlatformServices}
+            nowMs={nowMs}
             onRequireLogin={() => openAuthModal('login')}
             onAddToCart={handleAddToCart}
           />
         )}
 
-        {(activeTab === 'all' || activeTab === 'technicians') && (
+        {(activeTab === 'all' || activeTab === 'technicians') && isSectionEnabled('technicians') && (
           filteredTechnicians.length > 0 ? (
             <TechniciansSection
               technicians={filteredTechnicians}
               lang={lang}
               canUseServices={canUsePlatformServices}
+              nowMs={nowMs}
               onRequireLogin={() => openAuthModal('login')}
               onRequestTechnician={handleOpenTechnicianBooking}
               onViewReviews={handleOpenReviewsModal}
@@ -2269,55 +2911,147 @@ export default function App() {
           ) : null
         )}
 
-        {(activeTab === 'all' || activeTab === 'rides') && filteredRides.length > 0 && (
+        {(activeTab === 'all' || activeTab === 'rides') && isSectionEnabled('rides') && filteredRides.length > 0 && (
           <VillageRidesSection
             rides={filteredRides}
             lang={lang}
             canUseServices={canUsePlatformServices}
+            nowMs={nowMs}
             onRequireLogin={() => openAuthModal('login')}
             onBookRide={handleOpenRideBooking}
           />
         )}
 
-        {(activeTab === 'all' || activeTab === 'grocery') && filteredGrocery.length > 0 && (
+        {(activeTab === 'all' || activeTab === 'grocery') && isSectionEnabled('grocery') && filteredGrocery.length > 0 && (
           <GrocerySection
             items={filteredGrocery}
             lang={lang}
             canUseServices={canUsePlatformServices}
+            nowMs={nowMs}
             onRequireLogin={() => openAuthModal('login')}
             onAddToCart={handleAddToCart}
           />
         )}
 
-        {(activeTab === 'all' || activeTab === 'tutoring') && filteredTutors.length > 0 && (
+        {(activeTab === 'all' || activeTab === 'tutoring') && isSectionEnabled('tutoring') && filteredTutors.length > 0 && (
           <TutoringSection
             tutors={filteredTutors}
             lang={lang}
             canUseServices={canUsePlatformServices}
+            nowMs={nowMs}
             onRequireLogin={() => openAuthModal('login')}
             onBookTutor={handleOpenTutorBooking}
           />
         )}
 
-        {(activeTab === 'all' || activeTab === 'charity') && filteredCharities.length > 0 && (
+        {(activeTab === 'all' || activeTab === 'charity') && isSectionEnabled('charity') && filteredCharities.length > 0 && (
           <CharitySection
             charities={filteredCharities}
             lang={lang}
             canUseServices={canUsePlatformServices}
+            nowMs={nowMs}
             onRequireLogin={() => openAuthModal('login')}
             onContactCharity={handleOpenCharityContact}
           />
         )}
 
-        {(activeTab === 'all' || activeTab === 'other') && filteredOtherServices.length > 0 && (
+        {(activeTab === 'all' || activeTab === 'other') && isSectionEnabled('other') && filteredOtherServices.length > 0 && (
           <OtherServicesSection
             items={filteredOtherServices}
             lang={lang}
             canUseServices={canUsePlatformServices}
+            nowMs={nowMs}
             onRequireLogin={() => openAuthModal('login')}
             onRequestOther={handleOpenOtherBooking}
           />
         )}
+
+        {/* Custom Admin-Created Sections */}
+        {mergedSections
+          .filter((sec) => !sec.isBuiltIn && sec.isEnabled !== false)
+          .filter((sec) => activeTab === 'all' || activeTab === sec.id)
+          .map((sec) => {
+            const customItems: OtherService[] = byVillage(
+              approvedProviders
+                .filter(
+                  (p) =>
+                    p.category === sec.providerCategoryId ||
+                    p.category === sec.id
+                )
+                .map((p) => ({
+                  id: `prov-sec-${sec.id}-${p.id}`,
+                  ownerId: p.ownerId,
+                  villageId: p.villageId,
+                  name: { ar: p.nameAr, en: p.nameEn },
+                  activityType: { ar: p.specialtyAr, en: p.specialtyEn },
+                  description: { ar: p.bioAr || p.specialtyAr, en: p.bioEn || p.specialtyEn },
+                  address: { ar: p.neighborhoodAr || 'وسط البلد', en: p.neighborhoodEn || 'Village Center' },
+                  priceLabel: { ar: p.priceLabelAr || 'حسب الاتفاق', en: p.priceLabelEn || 'By agreement' },
+                  hours: { ar: 'يومياً حسب الاتفاق', en: 'Daily by appointment' },
+                  phone: p.phone,
+                  availability: toAvailability(p)
+                })),
+              true
+            ).filter(
+              (item) =>
+                item.name[lang].toLowerCase().includes(q) ||
+                item.activityType[lang].toLowerCase().includes(q) ||
+                item.description[lang].toLowerCase().includes(q)
+            );
+
+            if (customItems.length > 0) {
+              return (
+                <OtherServicesSection
+                  key={sec.id}
+                  items={customItems}
+                  lang={lang}
+                  canUseServices={canUsePlatformServices}
+                  nowMs={nowMs}
+                  sectionTitle={lang === 'ar' ? sec.nameAr : sec.nameEn}
+                  sectionDescription={
+                    sec.descriptionAr || sec.descriptionEn
+                      ? lang === 'ar'
+                        ? sec.descriptionAr || sec.descriptionEn
+                        : sec.descriptionEn || sec.descriptionAr
+                      : undefined
+                  }
+                  onRequireLogin={() => openAuthModal('login')}
+                  onRequestOther={handleOpenOtherBooking}
+                />
+              );
+            }
+
+            if (activeTab === sec.id) {
+              return (
+                <div
+                  key={sec.id}
+                  className="p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-3"
+                >
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    {lang === 'ar' ? sec.nameAr : sec.nameEn}
+                  </h3>
+                  {(sec.descriptionAr || sec.descriptionEn) && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {lang === 'ar' ? sec.descriptionAr : sec.descriptionEn}
+                    </p>
+                  )}
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'ar'
+                      ? `لا يوجد مقدمو خدمات مسجلون حالياً في قسم ${sec.nameAr}.`
+                      : `No providers registered yet in ${sec.nameEn}.`}
+                  </p>
+                  <button
+                    onClick={() => openAuthModal('register')}
+                    className={`px-4 py-2 rounded-xl ${theme.solidBg} ${theme.hoverBg} text-white text-xs font-bold cursor-pointer`}
+                  >
+                    {lang === 'ar' ? 'سجل كمقدم خدمة في هذا القسم' : 'Register in This Section'}
+                  </button>
+                </div>
+              );
+            }
+
+            return null;
+          })}
       </main>
 
       {/* MODALS */}
@@ -2335,6 +3069,7 @@ export default function App() {
         isBanned={isCurrentUserBanned}
         banReason={ownPhoneBan?.reason || effectiveProfile?.banReason}
         banUntilMs={ownPhoneBan?.banUntilMs || effectiveProfile?.banUntilMs}
+        sections={mergedSections}
         onProfileSaved={() => {}}
         onOpenAdminPanel={() => setIsAdminModalOpen(true)}
       />

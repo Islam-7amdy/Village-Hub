@@ -89,7 +89,7 @@ service cloud.firestore {
         isValidId(data.villageId) &&
         (!('neighborhood' in data) || (data.neighborhood is string && data.neighborhood.size() <= 100)) &&
         data.providerStatus in ['none', 'pending', 'approved', 'rejected'] &&
-        (!('serviceCategory' in data) || (data.serviceCategory in ['none', 'doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'other', 'farm', 'ride'])) &&
+        (!('serviceCategory' in data) || (isValidId(data.serviceCategory) && data.serviceCategory.size() <= 40)) &&
         (!('serviceTitle' in data) || (data.serviceTitle is string && data.serviceTitle.size() <= 100)) &&
         (!('serviceFeeEgp' in data) || (data.serviceFeeEgp is string && data.serviceFeeEgp.size() <= 60)) &&
         (!('serviceBio' in data) || (data.serviceBio is string && data.serviceBio.size() <= 400)) &&
@@ -127,13 +127,15 @@ service cloud.firestore {
         data.keys().hasOnly([
           'ownerId', 'villageId', 'nameAr', 'nameEn', 'category', 'specialtyAr', 'specialtyEn',
           'phone', 'neighborhoodAr', 'neighborhoodEn', 'priceLabelAr', 'priceLabelEn',
-          'bioAr', 'bioEn', 'status', 'createdAt', 'updatedAt'
+          'bioAr', 'bioEn',
+          'isAcceptingOrders', 'manualClosedReason', 'scheduleEnabled', 'openTime', 'closeTime', 'workingDays',
+          'status', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.ownerId) &&
         isValidId(data.villageId) &&
         data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 80 &&
         data.nameEn is string && data.nameEn.size() >= 1 && data.nameEn.size() <= 80 &&
-        data.category in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'other', 'farm', 'ride'] &&
+        isValidId(data.category) && data.category.size() <= 40 &&
         data.specialtyAr is string && data.specialtyAr.size() >= 1 && data.specialtyAr.size() <= 120 &&
         data.specialtyEn is string && data.specialtyEn.size() >= 1 && data.specialtyEn.size() <= 120 &&
         data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
@@ -143,6 +145,12 @@ service cloud.firestore {
         (!('priceLabelEn' in data) || (data.priceLabelEn is string && data.priceLabelEn.size() <= 60)) &&
         (!('bioAr' in data) || (data.bioAr is string && data.bioAr.size() <= 400)) &&
         (!('bioEn' in data) || (data.bioEn is string && data.bioEn.size() <= 400)) &&
+        (!('isAcceptingOrders' in data) || (data.isAcceptingOrders is bool)) &&
+        (!('manualClosedReason' in data) || (data.manualClosedReason is string && data.manualClosedReason.size() <= 120)) &&
+        (!('scheduleEnabled' in data) || (data.scheduleEnabled is bool)) &&
+        (!('openTime' in data) || (data.openTime is string && data.openTime.size() <= 10 && data.openTime.matches('^([01]\\d|2[0-3]):[0-5]\\d$'))) &&
+        (!('closeTime' in data) || (data.closeTime is string && data.closeTime.size() <= 10 && data.closeTime.matches('^([01]\\d|2[0-3]):[0-5]\\d$'))) &&
+        (!('workingDays' in data) || (data.workingDays is list && data.workingDays.size() <= 7 && (data.workingDays.size() == 0 || (data.workingDays[0] is number && data.workingDays[0] >= 0 && data.workingDays[0] <= 6)))) &&
         data.status in ['pending', 'approved', 'rejected'] &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -184,7 +192,7 @@ service cloud.firestore {
         ]) &&
         isValidId(data.ownerId) &&
         isValidId(data.villageId) &&
-        data.serviceType in ['doctor', 'technician', 'food', 'pharmacy', 'grocery', 'tutoring', 'charity', 'other', 'farm', 'ride'] &&
+        isValidId(data.serviceType) && data.serviceType.size() <= 40 &&
         data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
         (!('providerOwnerId' in data) || isValidId(data.providerOwnerId)) &&
         data.providerName is string && data.providerName.size() >= 1 && data.providerName.size() <= 100 &&
@@ -242,6 +250,44 @@ service cloud.firestore {
         (!('adPriceMonthEgp' in data) || (data.adPriceMonthEgp is number && data.adPriceMonthEgp >= 0 && data.adPriceMonthEgp <= 50000)) &&
         (!('commissionRatePercent' in data) || (data.commissionRatePercent is number && data.commissionRatePercent >= 0 && data.commissionRatePercent <= 50)) &&
         data.updatedAt is timestamp;
+    }
+
+    function isValidServiceSection(data) {
+      return data.keys().hasAll(['id', 'providerCategoryId', 'nameAr', 'nameEn', 'isEnabled', 'sortOrder', 'isBuiltIn', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'providerCategoryId', 'nameAr', 'nameEn', 'descriptionAr', 'descriptionEn',
+          'iconKey', 'colorCode', 'isEnabled', 'sortOrder', 'isBuiltIn', 'updatedAt'
+        ]) &&
+        isValidId(data.id) && data.id.size() <= 40 &&
+        isValidId(data.providerCategoryId) && data.providerCategoryId.size() <= 40 &&
+        data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 60 &&
+        data.nameEn is string && data.nameEn.size() >= 1 && data.nameEn.size() <= 60 &&
+        (!('descriptionAr' in data) || (data.descriptionAr is string && data.descriptionAr.size() <= 200)) &&
+        (!('descriptionEn' in data) || (data.descriptionEn is string && data.descriptionEn.size() <= 200)) &&
+        (!('iconKey' in data) || (data.iconKey is string && data.iconKey.size() <= 32)) &&
+        (!('colorCode' in data) || (data.colorCode is string && data.colorCode.size() <= 24)) &&
+        data.isEnabled is bool &&
+        data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 1000 &&
+        data.isBuiltIn is bool &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAnalyticsEvent(data) {
+      return data.keys().hasAll(['ownerId', 'eventType', 'targetId', 'villageId', 'createdAtMs', 'createdAt']) &&
+        data.keys().hasOnly([
+          'ownerId', 'userName', 'userPhone', 'userRole', 'eventType',
+          'targetId', 'targetLabel', 'villageId', 'createdAtMs', 'createdAt'
+        ]) &&
+        isValidId(data.ownerId) &&
+        (!('userName' in data) || (data.userName is string && data.userName.size() <= 80)) &&
+        (!('userPhone' in data) || (data.userPhone is string && data.userPhone.size() <= 30)) &&
+        (!('userRole' in data) || (data.userRole in ['resident', 'provider', 'admin', 'guest'])) &&
+        data.eventType in ['section_view', 'ad_view', 'ad_click', 'provider_view'] &&
+        data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+        (!('targetLabel' in data) || (data.targetLabel is string && data.targetLabel.size() <= 120)) &&
+        isValidId(data.villageId) &&
+        data.createdAtMs is number && data.createdAtMs >= 0 &&
+        data.createdAt is timestamp;
     }
 
     // Villages collection (public read, admin write)
@@ -363,7 +409,9 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly([
               'villageId', 'nameAr', 'nameEn', 'category', 'specialtyAr', 'specialtyEn',
               'phone', 'neighborhoodAr', 'neighborhoodEn', 'priceLabelAr', 'priceLabelEn',
-              'bioAr', 'bioEn', 'updatedAt'
+              'bioAr', 'bioEn',
+              'isAcceptingOrders', 'manualClosedReason', 'scheduleEnabled', 'openTime', 'closeTime', 'workingDays',
+              'updatedAt'
             ])
           )
         );
@@ -484,6 +532,36 @@ service cloud.firestore {
         incoming().createdAt == request.time;
       allow update: if false;
       allow delete: if isValidId(reviewId) && (isAdmin() || isOwner(existing().ownerId));
+    }
+
+    // Dynamic Service Sections (public read, admin full control)
+    match /sections/{sectionId} {
+      allow get: if isValidId(sectionId);
+      allow list: if true;
+      allow create, update: if isAdmin() &&
+        isValidId(sectionId) &&
+        isValidServiceSection(incoming()) &&
+        incoming().id == sectionId &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(sectionId);
+    }
+
+    // Telemetry: Views, Ad Browsing & Provider Engagement (Admin sees all; verified users write/read own)
+    match /analyticsEvents/{eventId} {
+      allow get: if isValidId(eventId) && (
+        isAdmin() ||
+        (isSignedIn() && existing().ownerId == request.auth.uid)
+      );
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isValidId(eventId) &&
+        isSignedIn() &&
+        isVerifiedUser() &&
+        isNotBannedUser() &&
+        isValidAnalyticsEvent(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(eventId);
     }
   }
 }

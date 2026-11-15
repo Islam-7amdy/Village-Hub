@@ -21,7 +21,8 @@ import {
   isBanCurrentlyActive,
   isAdExpired,
   getAllowedStatusesForService,
-  getServiceStatusLabel
+  getServiceStatusLabel,
+  evaluateProviderAvailability
 } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
 import { VillageLogo, renderVillageLogoGlyph } from '../VillageLogo';
@@ -2112,7 +2113,9 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     : 'No new service provider requests yet.'}
                 </div>
               ) : (
-                providers.map((p) => (
+                providers.map((p) => {
+                  const avail = evaluateProviderAvailability(p, nowMs);
+                  return (
                   <div
                     key={p.id}
                     className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -2148,6 +2151,24 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                             ? 'مستني الموافقة'
                             : 'Pending'}
                         </span>
+                        <span className="text-slate-400">·</span>
+                        <span
+                          className={`text-[11px] font-bold ${
+                            avail.isOpen
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-rose-600 dark:text-rose-400'
+                          }`}
+                        >
+                          {avail.isOpen
+                            ? lang === 'ar'
+                              ? 'مفتوح للطلبات'
+                              : 'Open'
+                            : avail.manualClosedReason
+                            ? `${lang === 'ar' ? 'مغلق' : 'Closed'} (${avail.manualClosedReason})`
+                            : lang === 'ar'
+                            ? avail.labelAr
+                            : avail.labelEn}
+                        </span>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
@@ -2158,6 +2179,14 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                           <>
                             <span>·</span>
                             <span className="font-mono">{lang === 'ar' ? p.priceLabelAr : p.priceLabelEn}</span>
+                          </>
+                        )}
+                        {avail.scheduleTextAr && (
+                          <>
+                            <span>·</span>
+                            <span className="font-mono tabular-nums">
+                              {lang === 'ar' ? `المواعيد: ${avail.scheduleTextAr}` : `Hours: ${avail.scheduleTextEn}`}
+                            </span>
                           </>
                         )}
                       </div>
@@ -2192,7 +2221,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                       )}
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           )}

@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { FoodItem, Language } from '../../data/villageData';
+import { FoodItem, Language, evaluateProviderAvailability } from '../../data/villageData';
 import { TRANSLATIONS } from '../../data/translations';
-import { Utensils, Plus, Check, Clock, ShoppingBag } from 'lucide-react';
+import { Utensils, Plus, Check, Lock, CheckCircle2 } from 'lucide-react';
 
 interface FoodSectionProps {
   foods: FoodItem[];
   lang: Language;
   canUseServices: boolean;
+  nowMs?: number;
   onRequireLogin: () => void;
   onAddToCart: (item: {
     id: string;
@@ -22,6 +23,7 @@ export const FoodSection: React.FC<FoodSectionProps> = ({
   foods,
   lang,
   canUseServices,
+  nowMs,
   onRequireLogin,
   onAddToCart
 }) => {
@@ -41,6 +43,8 @@ export const FoodSection: React.FC<FoodSectionProps> = ({
     : foods.filter((f) => f.category === selectedCategory);
 
   const handleAdd = (item: FoodItem) => {
+    const avail = evaluateProviderAvailability(item.availability, nowMs);
+    if (!avail.isOpen) return;
     if (!canUseServices) {
       onRequireLogin();
       return;
@@ -97,10 +101,15 @@ export const FoodSection: React.FC<FoodSectionProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filtered.map((item) => {
           const isAdded = addedIds[item.id];
+          const avail = evaluateProviderAvailability(item.availability, nowMs);
           return (
             <div
               key={item.id}
-              className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-all flex flex-col sm:flex-row gap-4"
+              className={`bg-white dark:bg-slate-900 rounded-2xl border p-4 shadow-2xs transition-all flex flex-col sm:flex-row gap-4 ${
+                avail.isOpen
+                  ? 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                  : 'border-rose-200/80 dark:border-rose-900/50 opacity-85'
+              }`}
             >
               <img
                 src={item.image}
@@ -122,6 +131,28 @@ export const FoodSection: React.FC<FoodSectionProps> = ({
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
                     {item.description[lang]}
                   </p>
+
+                  {!avail.isOpen ? (
+                    <div className="mt-2 px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[11px] text-rose-800 dark:text-rose-200 space-y-0.5">
+                      <div className="font-bold flex items-center gap-1">
+                        <Lock className="w-3 h-3 shrink-0" />
+                        <span>{avail.manualClosedReason || (lang === 'ar' ? avail.labelAr : avail.labelEn)}</span>
+                      </div>
+                      {avail.scheduleTextAr && (
+                        <div className="font-mono tabular-nums opacity-80">
+                          {lang === 'ar' ? `مواعيد العمل: ${avail.scheduleTextAr}` : `Hours: ${avail.scheduleTextEn}`}
+                        </div>
+                      )}
+                    </div>
+                  ) : avail.scheduleTextAr ? (
+                    <div className="mt-2 px-2.5 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/40 text-[11px] text-emerald-700 dark:text-emerald-300 flex items-center justify-between gap-2">
+                      <span className="font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 shrink-0" />
+                        {lang === 'ar' ? 'مفتوح الآن' : 'Open'}
+                      </span>
+                      <span className="font-mono tabular-nums">{lang === 'ar' ? avail.scheduleTextAr : avail.scheduleTextEn}</span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
@@ -130,14 +161,23 @@ export const FoodSection: React.FC<FoodSectionProps> = ({
                   </div>
 
                   <button
+                    type="button"
+                    disabled={!avail.isOpen}
                     onClick={() => handleAdd(item)}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
-                      isAdded
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-orange-600 hover:bg-orange-700 text-white'
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                      !avail.isOpen
+                        ? 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-not-allowed'
+                        : isAdded
+                        ? 'bg-emerald-600 text-white cursor-pointer shadow-2xs'
+                        : 'bg-orange-600 hover:bg-orange-700 text-white cursor-pointer shadow-2xs'
                     }`}
                   >
-                    {isAdded ? (
+                    {!avail.isOpen ? (
+                      <>
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>{lang === 'ar' ? 'مغلق الآن' : 'Closed'}</span>
+                      </>
+                    ) : isAdded ? (
                       <>
                         <Check className="w-3.5 h-3.5" />
                         <span>{lang === 'ar' ? 'تمت الإضافة' : 'Added'}</span>
@@ -158,3 +198,4 @@ export const FoodSection: React.FC<FoodSectionProps> = ({
     </div>
   );
 };
+

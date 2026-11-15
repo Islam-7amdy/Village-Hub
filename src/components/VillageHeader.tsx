@@ -3,6 +3,10 @@ import {
   Language,
   UserProfile,
   VillageConfig,
+  ServiceSectionConfig,
+  SectionIconKey,
+  SectionColorKey,
+  DEFAULT_SERVICE_SECTIONS,
   getVillageTheme
 } from '../data/villageData';
 import { TRANSLATIONS } from '../data/translations';
@@ -31,8 +35,39 @@ import {
   HeartHandshake,
   Shapes,
   PackageCheck,
-  Briefcase
+  Briefcase,
+  Store,
+  Hammer
 } from 'lucide-react';
+
+const SECTION_ICON_MAP: Record<SectionIconKey, React.ComponentType<{ className?: string }>> = {
+  layout: LayoutGrid,
+  stethoscope: Stethoscope,
+  pill: Pill,
+  utensils: Utensils,
+  wrench: Wrench,
+  car: Car,
+  shopping_basket: ShoppingBag,
+  graduation_cap: GraduationCap,
+  heart_handshake: HeartHandshake,
+  shapes: Shapes,
+  store: Store,
+  hammer: Hammer,
+  sparkles: Sparkles
+};
+
+const SECTION_COLOR_MAP: Record<SectionColorKey, string> = {
+  amber: 'text-amber-600 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-900/60',
+  emerald: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-900/60',
+  rose: 'text-rose-600 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-900/60',
+  orange: 'text-orange-600 bg-orange-50 dark:bg-orange-950/50 border-orange-200 dark:border-orange-900/60',
+  blue: 'text-blue-600 bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-900/60',
+  lime: 'text-lime-700 bg-lime-50 dark:bg-lime-950/50 border-lime-200 dark:border-lime-900/60',
+  indigo: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-900/60',
+  teal: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-900/60',
+  purple: 'text-purple-600 bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-900/60',
+  slate: 'text-slate-600 bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+};
 
 interface VillageHeaderProps {
   lang: Language;
@@ -59,6 +94,7 @@ interface VillageHeaderProps {
   userProfile: UserProfile | null;
   userPhotoUrl?: string;
   pendingAdminCount: number;
+  sections?: ServiceSectionConfig[];
   onOpenAuth: () => void;
   onOpenAdminPanel: () => void;
 }
@@ -88,6 +124,7 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
   userProfile,
   userPhotoUrl,
   pendingAdminCount,
+  sections,
   onOpenAuth,
   onOpenAdminPanel
 }) => {
@@ -102,17 +139,19 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
     }
   }, [isMobileSearchOpen]);
 
+  const activeSections = (sections && sections.length > 0 ? sections : DEFAULT_SERVICE_SECTIONS)
+    .filter((s) => s.isEnabled !== false)
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+
   const allNavItems = [
     { id: 'all', label: t.allServices, icon: LayoutGrid, color: `${theme.text} ${theme.softBg} ${theme.border}` },
-    { id: 'doctors', label: t.doctors, icon: Stethoscope, color: 'text-rose-600 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-900/60' },
-    { id: 'pharmacy', label: t.pharmacy, icon: Pill, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-900/60' },
-    { id: 'food', label: t.food, icon: Utensils, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/50 border-orange-200 dark:border-orange-900/60' },
-    { id: 'technicians', label: t.technicians, icon: Wrench, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-900/60' },
-    { id: 'rides', label: t.rides, icon: Car, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-900/60' },
-    { id: 'grocery', label: t.grocery, icon: ShoppingBasket, color: 'text-lime-700 bg-lime-50 dark:bg-lime-950/50 border-lime-200 dark:border-lime-900/60' },
-    { id: 'tutoring', label: t.tutoring, icon: GraduationCap, color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-900/60' },
-    { id: 'charity', label: t.charity, icon: HeartHandshake, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-900/60' },
-    { id: 'other', label: t.other, icon: Shapes, color: 'text-purple-600 bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-900/60' }
+    ...activeSections.map((sec) => ({
+      id: sec.id,
+      label: lang === 'ar' ? sec.nameAr : sec.nameEn,
+      icon: SECTION_ICON_MAP[sec.iconKey] || Shapes,
+      color: SECTION_COLOR_MAP[sec.colorCode] || SECTION_COLOR_MAP.slate
+    }))
   ];
 
   const brandName = lang === 'ar' ? activeVillage.nameAr : activeVillage.nameEn;
@@ -380,10 +419,10 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
           </div>
         )}
 
-        {/* Pinned 10 Service Categories Strip (replaces plain text bar) */}
+        {/* Pinned Dynamic Service Categories Strip */}
         <nav
           aria-label={t.allServices}
-          className="flex items-center gap-2 overflow-x-auto lg:grid lg:grid-cols-10 py-2.5 border-t border-slate-100 dark:border-slate-800 no-scrollbar"
+          className="flex items-center gap-2 overflow-x-auto py-2.5 border-t border-slate-100 dark:border-slate-800 no-scrollbar"
         >
           {allNavItems.map((item) => {
             const Icon = item.icon;
@@ -393,7 +432,7 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => onTabChange(item.id)}
-                className={`min-w-[92px] shrink-0 lg:min-w-0 p-2 rounded-2xl border transition-all text-center flex flex-col items-center gap-1.5 group cursor-pointer ${
+                className={`min-w-[100px] flex-1 shrink-0 p-2 rounded-2xl border transition-all text-center flex flex-col items-center gap-1.5 group cursor-pointer ${
                   isActive
                     ? `${theme.softBg} ${theme.border}`
                     : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'

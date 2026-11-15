@@ -37,7 +37,7 @@
         "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "neighborhood": { "type": "string", "maxLength": 100 },
         "providerStatus": { "type": "string", "enum": ["none", "pending", "approved", "rejected"] },
-        "serviceCategory": { "type": "string", "enum": ["none", "doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "other", "farm", "ride"] },
+        "serviceCategory": { "type": "string", "maxLength": 40, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "serviceTitle": { "type": "string", "maxLength": 100 },
         "serviceFeeEgp": { "type": "string", "maxLength": 60 },
         "serviceBio": { "type": "string", "maxLength": 400 },
@@ -85,7 +85,7 @@
         "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "nameAr": { "type": "string", "minLength": 1, "maxLength": 80 },
         "nameEn": { "type": "string", "minLength": 1, "maxLength": 80 },
-        "category": { "type": "string", "enum": ["doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "other", "farm", "ride"] },
+        "category": { "type": "string", "maxLength": 40, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "specialtyAr": { "type": "string", "minLength": 1, "maxLength": 120 },
         "specialtyEn": { "type": "string", "minLength": 1, "maxLength": 120 },
         "phone": { "type": "string", "minLength": 3, "maxLength": 30 },
@@ -95,6 +95,12 @@
         "priceLabelEn": { "type": "string", "maxLength": 60 },
         "bioAr": { "type": "string", "maxLength": 400 },
         "bioEn": { "type": "string", "maxLength": 400 },
+        "isAcceptingOrders": { "type": "boolean" },
+        "manualClosedReason": { "type": "string", "maxLength": 120 },
+        "scheduleEnabled": { "type": "boolean" },
+        "openTime": { "type": "string", "maxLength": 10, "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$" },
+        "closeTime": { "type": "string", "maxLength": 10, "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$" },
+        "workingDays": { "type": "array" },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -131,7 +137,7 @@
       "properties": {
         "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "serviceType": { "type": "string", "enum": ["doctor", "technician", "food", "pharmacy", "grocery", "tutoring", "charity", "other", "farm", "ride"] },
+        "serviceType": { "type": "string", "maxLength": 40, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "title": { "type": "string", "minLength": 1, "maxLength": 160 },
         "providerOwnerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "providerName": { "type": "string", "minLength": 1, "maxLength": 100 },
@@ -194,6 +200,44 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["activeVillageId", "updatedAt"]
+    },
+    "ServiceSection": {
+      "title": "ServiceSection",
+      "description": "Platform service section/category configured by admin (built-in overrides and custom sections).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 40, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "providerCategoryId": { "type": "string", "maxLength": 40, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "nameAr": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "nameEn": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "descriptionAr": { "type": "string", "maxLength": 200 },
+        "descriptionEn": { "type": "string", "maxLength": 200 },
+        "iconKey": { "type": "string", "maxLength": 32 },
+        "colorCode": { "type": "string", "maxLength": 24 },
+        "isEnabled": { "type": "boolean" },
+        "sortOrder": { "type": "number" },
+        "isBuiltIn": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "providerCategoryId", "nameAr", "nameEn", "isEnabled", "sortOrder", "isBuiltIn", "updatedAt"]
+    },
+    "AnalyticsEvent": {
+      "title": "AnalyticsEvent",
+      "description": "User browsing, section view, ad view/click, and provider view telemetry event.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 80 },
+        "userPhone": { "type": "string", "maxLength": 30 },
+        "userRole": { "type": "string", "enum": ["resident", "provider", "admin", "guest"] },
+        "eventType": { "type": "string", "enum": ["section_view", "ad_view", "ad_click", "provider_view"] },
+        "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "targetLabel": { "type": "string", "maxLength": 120 },
+        "villageId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAtMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "eventType", "targetId", "villageId", "createdAtMs", "createdAt"]
     }
   },
   "firestore": {
@@ -232,6 +276,14 @@
     "/appConfig/{docId}": {
       "schema": { "$ref": "#/entities/AppSettings" },
       "description": "Global platform configuration controlled by admin."
+    },
+    "/sections/{sectionId}": {
+      "schema": { "$ref": "#/entities/ServiceSection" },
+      "description": "Dynamic service categories/sections managed by admin."
+    },
+    "/analyticsEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/AnalyticsEvent" },
+      "description": "Views, ad browsing, and provider view events per user."
     }
   }
 }

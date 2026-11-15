@@ -159,7 +159,7 @@ export interface UserProfile {
   villageId: string;
   neighborhood?: string;
   providerStatus: 'none' | 'pending' | 'approved' | 'rejected';
-  serviceCategory?: 'none' | 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride';
+  serviceCategory?: 'none' | 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride' | (string & {});
   serviceTitle?: string;
   serviceFeeEgp?: string;
   serviceBio?: string;
@@ -183,13 +183,32 @@ export interface PlatformPricingConfig {
   commissionRatePercent?: number;
 }
 
-export interface ProviderListing {
+export interface ProviderAvailabilityConfig {
+  isAcceptingOrders?: boolean;
+  manualClosedReason?: string;
+  scheduleEnabled?: boolean;
+  openTime?: string; // 24h HH:MM
+  closeTime?: string; // 24h HH:MM
+  workingDays?: number[]; // 0=Sun..6=Sat
+}
+
+export interface ProviderAvailabilityStatus {
+  isOpen: boolean;
+  reason: 'open' | 'manual_closed' | 'outside_hours' | 'day_off';
+  labelAr: string;
+  labelEn: string;
+  scheduleTextAr?: string;
+  scheduleTextEn?: string;
+  manualClosedReason?: string;
+}
+
+export interface ProviderListing extends ProviderAvailabilityConfig {
   id: string;
   ownerId: string;
   villageId: string;
   nameAr: string;
   nameEn: string;
-  category: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride';
+  category: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride' | (string & {});
   specialtyAr: string;
   specialtyEn: string;
   phone: string;
@@ -247,6 +266,7 @@ export interface DoctorService {
   fee: { ar: string; en: string };
   supportsHomeVisit: boolean;
   avatar: string;
+  availability?: ProviderAvailabilityConfig;
 }
 
 export interface TechnicianService {
@@ -265,6 +285,7 @@ export interface TechnicianService {
   neighborhood: { ar: string; en: string };
   avatar: string;
   bio: { ar: string; en: string };
+  availability?: ProviderAvailabilityConfig;
 }
 
 export interface FoodItem {
@@ -278,6 +299,7 @@ export interface FoodItem {
   category: 'bakery' | 'traditional' | 'grill' | 'dessert';
   restaurantName: { ar: string; en: string };
   image: string;
+  availability?: ProviderAvailabilityConfig;
 }
 
 export interface PharmacyItem {
@@ -291,6 +313,7 @@ export interface PharmacyItem {
   currency: { ar: string; en: string };
   inStock: boolean;
   requiresPrescription: boolean;
+  availability?: ProviderAvailabilityConfig;
 }
 
 export interface GroceryItem {
@@ -304,6 +327,7 @@ export interface GroceryItem {
   price: number;
   unit: { ar: string; en: string };
   currency: { ar: string; en: string };
+  availability?: ProviderAvailabilityConfig;
 }
 
 export interface TutoringService {
@@ -319,6 +343,7 @@ export interface TutoringService {
   location: { ar: string; en: string };
   phone: string;
   mode: { ar: string; en: string };
+  availability?: ProviderAvailabilityConfig;
 }
 
 export interface CharityOrg {
@@ -331,6 +356,7 @@ export interface CharityOrg {
   address: { ar: string; en: string };
   phone: string;
   donationExample: { ar: string; en: string };
+  availability?: ProviderAvailabilityConfig;
 }
 
 export interface FarmHarvestItem {
@@ -367,6 +393,7 @@ export interface VillageRide {
   pricePerSeat: { ar: string; en: string };
   carModel: string;
   phone: string;
+  availability?: ProviderAvailabilityConfig;
 }
 
 export interface OtherService {
@@ -380,6 +407,7 @@ export interface OtherService {
   priceLabel: { ar: string; en: string };
   hours: { ar: string; en: string };
   phone: string;
+  availability?: ProviderAvailabilityConfig;
 }
 
 export type BookingStatus =
@@ -398,7 +426,7 @@ export interface BookingRequest {
   id: string;
   ownerId?: string;
   villageId?: string;
-  serviceType: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride';
+  serviceType: 'doctor' | 'technician' | 'food' | 'pharmacy' | 'grocery' | 'tutoring' | 'charity' | 'other' | 'farm' | 'ride' | (string & {});
   title: string;
   providerOwnerId?: string;
   providerName: string;
@@ -565,6 +593,296 @@ export function maskReferenceCode(ref?: string): string {
   const clean = ref.trim();
   if (clean.length <= 2) return '••••';
   return `••••${clean.slice(-2)}`;
+}
+
+export const WEEKDAY_LABELS: { day: number; labelAr: string; labelEn: string }[] = [
+  { day: 6, labelAr: 'السبت', labelEn: 'Sat' },
+  { day: 0, labelAr: 'الأحد', labelEn: 'Sun' },
+  { day: 1, labelAr: 'الإثنين', labelEn: 'Mon' },
+  { day: 2, labelAr: 'الثلاثاء', labelEn: 'Tue' },
+  { day: 3, labelAr: 'الأربعاء', labelEn: 'Wed' },
+  { day: 4, labelAr: 'الخميس', labelEn: 'Thu' },
+  { day: 5, labelAr: 'الجمعة', labelEn: 'Fri' }
+];
+
+function parseHhMmToMinutes(hhmm?: string, fallbackMinutes = 540): number {
+  if (!hhmm) return fallbackMinutes;
+  const match = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return fallbackMinutes;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h < 0 || h > 23 || m < 0 || m > 59) return fallbackMinutes;
+  return h * 60 + m;
+}
+
+export function formatTimeDisplay(hhmm: string, lang: Language): string {
+  const match = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return hhmm;
+  const h24 = Number(match[1]);
+  const m = Number(match[2]);
+  const period = h24 >= 12 ? (lang === 'ar' ? 'م' : 'PM') : lang === 'ar' ? 'ص' : 'AM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const mm = String(m).padStart(2, '0');
+  return `${h12}:${mm} ${period}`;
+}
+
+export function evaluateProviderAvailability(
+  config?: ProviderAvailabilityConfig,
+  nowMs = Date.now()
+): ProviderAvailabilityStatus {
+  const scheduleEnabled = Boolean(config?.scheduleEnabled);
+  const openTime = config?.openTime || '09:00';
+  const closeTime = config?.closeTime || '22:00';
+  const scheduleTextAr = scheduleEnabled
+    ? `${formatTimeDisplay(openTime, 'ar')} - ${formatTimeDisplay(closeTime, 'ar')}`
+    : undefined;
+  const scheduleTextEn = scheduleEnabled
+    ? `${formatTimeDisplay(openTime, 'en')} - ${formatTimeDisplay(closeTime, 'en')}`
+    : undefined;
+
+  if (config?.isAcceptingOrders === false) {
+    return {
+      isOpen: false,
+      reason: 'manual_closed',
+      labelAr: 'مغلق الآن — متوقف عن استلام الطلبات',
+      labelEn: 'Closed Now — Not Accepting Orders',
+      scheduleTextAr,
+      scheduleTextEn,
+      manualClosedReason: config.manualClosedReason?.trim() || undefined
+    };
+  }
+
+  if (scheduleEnabled) {
+    const now = new Date(nowMs);
+    const today = now.getDay();
+    const yesterday = (today + 6) % 7;
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const openMinutes = parseHhMmToMinutes(openTime, 9 * 60);
+    const closeMinutes = parseHhMmToMinutes(closeTime, 22 * 60);
+    const days = Array.isArray(config?.workingDays) ? config.workingDays : [6, 0, 1, 2, 3, 4];
+
+    let withinSchedule = false;
+    let isDayOff = false;
+
+    if (openMinutes === closeMinutes) {
+      withinSchedule = days.includes(today);
+      isDayOff = !withinSchedule;
+    } else if (openMinutes < closeMinutes) {
+      if (!days.includes(today)) {
+        isDayOff = true;
+      } else {
+        withinSchedule = nowMinutes >= openMinutes && nowMinutes < closeMinutes;
+      }
+    } else {
+      // Overnight shift (e.g., 18:00 -> 02:00)
+      const inTonightShift = days.includes(today) && nowMinutes >= openMinutes;
+      const inYesterdayShift = days.includes(yesterday) && nowMinutes < closeMinutes;
+      withinSchedule = inTonightShift || inYesterdayShift;
+      if (!withinSchedule && !days.includes(today)) {
+        isDayOff = true;
+      }
+    }
+
+    if (!withinSchedule) {
+      return {
+        isOpen: false,
+        reason: isDayOff ? 'day_off' : 'outside_hours',
+        labelAr: isDayOff
+          ? 'مغلق اليوم — خارج أيام العمل'
+          : 'مغلق الآن — خارج مواعيد العمل',
+        labelEn: isDayOff
+          ? 'Closed Today — Day Off'
+          : 'Closed Now — Outside Working Hours',
+        scheduleTextAr,
+        scheduleTextEn
+      };
+    }
+  }
+
+  return {
+    isOpen: true,
+    reason: 'open',
+    labelAr: 'مفتوح الآن',
+    labelEn: 'Open Now',
+    scheduleTextAr,
+    scheduleTextEn
+  };
+}
+
+export type SectionIconKey =
+  | 'layout'
+  | 'stethoscope'
+  | 'pill'
+  | 'utensils'
+  | 'wrench'
+  | 'car'
+  | 'shopping_basket'
+  | 'graduation_cap'
+  | 'heart_handshake'
+  | 'shapes'
+  | 'store'
+  | 'hammer'
+  | 'sparkles';
+
+export type SectionColorKey =
+  | 'amber'
+  | 'emerald'
+  | 'rose'
+  | 'orange'
+  | 'blue'
+  | 'lime'
+  | 'indigo'
+  | 'teal'
+  | 'purple'
+  | 'slate';
+
+export interface ServiceSectionConfig {
+  id: string;
+  providerCategoryId: string;
+  nameAr: string;
+  nameEn: string;
+  descriptionAr: string;
+  descriptionEn: string;
+  iconKey: SectionIconKey;
+  colorCode: SectionColorKey;
+  isEnabled: boolean;
+  sortOrder: number;
+  isBuiltIn: boolean;
+}
+
+export const DEFAULT_SERVICE_SECTIONS: ServiceSectionConfig[] = [
+  {
+    id: 'doctors',
+    providerCategoryId: 'doctor',
+    nameAr: 'أطباء وعيادات',
+    nameEn: 'Doctors & Clinics',
+    descriptionAr: 'حجز عيادات الأطباء والتمريض والزيارات المنزلية في القرية',
+    descriptionEn: 'Village clinic appointments, doctors, and home visits',
+    iconKey: 'stethoscope',
+    colorCode: 'rose',
+    isEnabled: true,
+    sortOrder: 1,
+    isBuiltIn: true
+  },
+  {
+    id: 'pharmacy',
+    providerCategoryId: 'pharmacy',
+    nameAr: 'صيدليات',
+    nameEn: 'Pharmacies',
+    descriptionAr: 'طلب الأدوية ومستلزمات الصيدلية ورفع الروشتة',
+    descriptionEn: 'Medications, pharmacy essentials, and prescription upload',
+    iconKey: 'pill',
+    colorCode: 'emerald',
+    isEnabled: true,
+    sortOrder: 2,
+    isBuiltIn: true
+  },
+  {
+    id: 'food',
+    providerCategoryId: 'food',
+    nameAr: 'مطاعم وكافيهات',
+    nameEn: 'Restaurants & Cafes',
+    descriptionAr: 'أكلات بيتي، مخابز، مشويات وكافيهات القرية',
+    descriptionEn: 'Home cooking, bakeries, grills, and local cafes',
+    iconKey: 'utensils',
+    colorCode: 'orange',
+    isEnabled: true,
+    sortOrder: 3,
+    isBuiltIn: true
+  },
+  {
+    id: 'technicians',
+    providerCategoryId: 'technician',
+    nameAr: 'فنيون وحرفيون',
+    nameEn: 'Technicians & Craftsmen',
+    descriptionAr: 'كهربائي، سباك، نجار، فني تكييف وصيانة منزلية',
+    descriptionEn: 'Electricians, plumbers, carpenters, and home repair technicians',
+    iconKey: 'wrench',
+    colorCode: 'amber',
+    isEnabled: true,
+    sortOrder: 4,
+    isBuiltIn: true
+  },
+  {
+    id: 'rides',
+    providerCategoryId: 'ride',
+    nameAr: 'مواصلات',
+    nameEn: 'Transportation',
+    descriptionAr: 'توصيلات داخل القرية والمراكز والمدن المجاورة',
+    descriptionEn: 'Local rides and transit trips',
+    iconKey: 'car',
+    colorCode: 'blue',
+    isEnabled: true,
+    sortOrder: 5,
+    isBuiltIn: true
+  },
+  {
+    id: 'grocery',
+    providerCategoryId: 'grocery',
+    nameAr: 'بقالة وسوبر ماركت',
+    nameEn: 'Grocery & Market',
+    descriptionAr: 'سلع غذائية، خضار وفاكهة، وألبان بلدي',
+    descriptionEn: 'Groceries, fresh produce, and village dairy products',
+    iconKey: 'shopping_basket',
+    colorCode: 'lime',
+    isEnabled: true,
+    sortOrder: 6,
+    isBuiltIn: true
+  },
+  {
+    id: 'tutoring',
+    providerCategoryId: 'tutoring',
+    nameAr: 'دروس ومعلمون',
+    nameEn: 'Tutoring & Teachers',
+    descriptionAr: 'دروس تقوية لجميع المراحل الدراسية وتحفيظ القرآن',
+    descriptionEn: 'Academic tutoring and study circles for all grade levels',
+    iconKey: 'graduation_cap',
+    colorCode: 'indigo',
+    isEnabled: true,
+    sortOrder: 7,
+    isBuiltIn: true
+  },
+  {
+    id: 'charity',
+    providerCategoryId: 'charity',
+    nameAr: 'الجمعيات الخيرية',
+    nameEn: 'Charities & Aid',
+    descriptionAr: 'مبادرات التكافل، الكفالة، والمساعدات الطبية والغذائية',
+    descriptionEn: 'Local charity campaigns and community aid',
+    iconKey: 'heart_handshake',
+    colorCode: 'teal',
+    isEnabled: true,
+    sortOrder: 8,
+    isBuiltIn: true
+  },
+  {
+    id: 'other',
+    providerCategoryId: 'other',
+    nameAr: 'أخرى',
+    nameEn: 'Other Activities',
+    descriptionAr: 'مكتبات، صيانة موبايلات، مغاسل، وأنشطة متنوعة بالقرية',
+    descriptionEn: 'Printing, phone repair, laundry, and other village services',
+    iconKey: 'shapes',
+    colorCode: 'purple',
+    isEnabled: true,
+    sortOrder: 9,
+    isBuiltIn: true
+  }
+];
+
+export type AnalyticsEventType = 'section_view' | 'ad_view' | 'ad_click' | 'provider_view';
+
+export interface AnalyticsEventRecord {
+  id: string;
+  ownerId: string;
+  userName?: string;
+  userPhone?: string;
+  userRole?: 'resident' | 'provider' | 'admin' | 'guest';
+  eventType: AnalyticsEventType;
+  targetId: string;
+  targetLabel: string;
+  villageId: string;
+  createdAtMs: number;
 }
 
 export interface PendingPaymentOrder {
@@ -777,6 +1095,11 @@ export const TEST_DEMO_PROVIDERS: ProviderListing[] = [
     priceLabelEn: '150 EGP',
     bioAr: 'حشو وعلاج جذور وتنظيف جير وتقويم أسنان بأحدث الأجهزة في نقباس.',
     bioEn: 'Modern dental care, fillings, root canal, and orthodontics in Noqbas.',
+    isAcceptingOrders: true,
+    scheduleEnabled: false,
+    openTime: '09:00',
+    closeTime: '22:00',
+    workingDays: [6, 0, 1, 2, 3, 4],
     status: 'approved'
   },
   {
@@ -795,6 +1118,11 @@ export const TEST_DEMO_PROVIDERS: ProviderListing[] = [
     priceLabelEn: '80 EGP / Visit',
     bioAr: 'تأسيس وصيانة سباكة الحمامات والمطابخ وتركيب المواتير داخل نقباس.',
     bioEn: 'Home plumbing, water pumps, and leak repairs across Noqbas.',
+    isAcceptingOrders: true,
+    scheduleEnabled: false,
+    openTime: '08:00',
+    closeTime: '21:00',
+    workingDays: [6, 0, 1, 2, 3, 4],
     status: 'pending'
   }
 ];
