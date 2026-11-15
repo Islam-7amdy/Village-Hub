@@ -12,6 +12,7 @@ import {
   Language,
   UserProfile,
   BannedPhoneRecord,
+  DemoUserAdminAction,
   BookingRequest,
   BookingStatus,
   PlatformPricingConfig,
@@ -36,7 +37,6 @@ import {
 } from '../data/villageData';
 import { TRANSLATIONS } from '../data/translations';
 import { VillageLogo, renderVillageLogoGlyph } from './VillageLogo';
-import { DemoUserAdminAction } from './Modals/AdminDashboardModal';
 import { getStatusLabel, getPaymentMethodLabel } from './Modals/OrderStatusModal';
 import {
   ShieldCheck,

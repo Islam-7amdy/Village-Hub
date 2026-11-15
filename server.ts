@@ -1,5 +1,5 @@
-import express, { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
+import express from 'express';
+import type { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -16,6 +16,7 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(express.json());
 
 const apiKey = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-4-hydrogen';
 let aiClient: GoogleGenAI | null = null;
 if (apiKey) {
   aiClient = new GoogleGenAI({
@@ -28,140 +29,6 @@ if (apiKey) {
   });
 }
 
-// AI Clinical Triage Endpoint
-app.post('/api/triage', async (req: Request, res: Response) => {
-  try {
-    const { symptoms, duration, severity, age, existingConditions } = req.body;
-    if (!symptoms) {
-      res.status(400).json({ error: 'Symptoms description is required' });
-      return;
-    }
-
-    if (!aiClient) {
-      // Fallback rule-based guidance if GEMINI_API_KEY is not configured
-      res.json({
-        urgency: severity === 'severe' ? 'Urgent / Emergency Care' : 'Moderate / Schedule Primary Care',
-        urgencyLevel: severity === 'severe' ? 'urgent' : 'moderate',
-        summary: `Assessment for reported symptoms: "${symptoms}". Given the ${duration || 'current'} timeframe and ${severity || 'reported'} severity level.`,
-        potentialConsiderations: [
-          'Acute symptom escalation monitoring',
-          'Primary care or specialist follow-up recommended',
-          'Vitals tracking: blood pressure, pulse, temperature',
-        ],
-        recommendedSpecialist: symptoms.toLowerCase().includes('chest') || symptoms.toLowerCase().includes('heart') ? 'Cardiology' : 'Internal Medicine / Primary Care',
-        questionsForDoctor: [
-          'What tests or blood panels are recommended to isolate the cause?',
-          'Are there specific warning signs that warrant immediate emergency room care?',
-          'Do my existing medications interact with these symptoms?'
-        ],
-        selfCareGuidelines: [
-          'Rest in a comfortable, ventilated space and stay well hydrated',
-          'Log your temperature and blood pressure twice daily',
-          'Avoid strenuous physical exertion until evaluated by a licensed clinician'
-        ],
-        emergencyWarningSigns: [
-          'Sudden chest tightness radiating to the jaw, neck, or left arm',
-          'Severe acute shortness of breath or blue-tinted lips/fingers',
-          'Sudden loss of balance, confusion, or slurred speech'
-        ],
-        disclaimer: 'This guidance is an algorithmic triage reference and does not replace medical diagnosis by a licensed physician.'
-      });
-      return;
-    }
-
-    const prompt = `You are a clinical decision support and triage assistant. A patient is reporting the following details:
-- Symptoms: ${symptoms}
-- Duration: ${duration || 'Not specified'}
-- Self-reported Severity: ${severity || 'Moderate'}
-- Patient Age: ${age || 'Adult'}
-- Known Conditions: ${existingConditions ? existingConditions.join(', ') : 'None specified'}
-
-Provide a structured, compassionate, and medically sound triage evaluation in valid JSON format matching this schema:
-{
-  "urgency": "Urgent Care Required | Prompt Consultation (24-48h) | Routine Care | Self-Care & Monitor",
-  "urgencyLevel": "urgent" | "moderate" | "routine",
-  "summary": "1-2 sentence empathetic medical synthesis of what the patient reported",
-  "potentialConsiderations": ["3 concise clinical possibilities or physiological factors to investigate"],
-  "recommendedSpecialist": "e.g. Cardiology, Internal Medicine, Pulmonology, Neurology, etc.",
-  "questionsForDoctor": ["3 specific, high-yield questions the patient should bring to their consultation"],
-  "selfCareGuidelines": ["2-3 safe, conservative symptomatic measures before seeing the doctor"],
-  "emergencyWarningSigns": ["3 specific red flags that require immediate ER/911 call"],
-  "disclaimer": "Vitalis Clinical Triage is for informational and scheduling assistance only and does not constitute a formal medical diagnosis."
-}
-Respond with raw JSON only, no markdown wrapping.`;
-
-    const response = await aiClient.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const text = response.text || '{}';
-    const parsed = JSON.parse(text);
-    res.json(parsed);
-  } catch (error) {
-    console.error('Triage error:', error);
-    res.status(500).json({
-      error: 'Unable to complete AI triage assessment. Please consult your physician directly.',
-    });
-  }
-});
-
-// AI Doctor Clinical Note & SOAP Summary Endpoint
-app.post('/api/clinical-summary', async (req: Request, res: Response) => {
-  try {
-    const { patientName, age, vitals, subjectiveNotes, diagnosis, currentMedications } = req.body;
-
-    if (!aiClient) {
-      res.json({
-        soapNote: {
-          subjective: subjectiveNotes || 'Patient presents for evaluation of current health status.',
-          objective: `Vitals recorded: BP ${vitals?.bp || '120/80'}, HR ${vitals?.hr || '72'} bpm, Temp ${vitals?.temp || '98.6'}°F, SpO2 ${vitals?.spo2 || '98'}%. Physical examination benign.`,
-          assessment: diagnosis || 'Clinical stability maintained. Ongoing therapeutic protocol active.',
-          plan: 'Continue prescribed pharmacotherapy. Schedule repeat vitals check in 14 days. Routine metabolic panel ordered.'
-        },
-        patientFriendlySummary: `Dr. evaluated your current symptoms and vitals. Your clinical indicators are stable. Please continue taking your medications as prescribed and return for your follow-up appointment.`
-      });
-      return;
-    }
-
-    const prompt = `Generate a structured clinical SOAP note and a patient-friendly consultation summary based on:
-Patient: ${patientName}, Age: ${age}
-Current Vitals: BP: ${vitals?.bp}, HR: ${vitals?.hr}, Temp: ${vitals?.temp}, SpO2: ${vitals?.spo2}
-Doctor notes & observations: ${subjectiveNotes}
-Assessment / Working Diagnosis: ${diagnosis}
-Current Medications: ${currentMedications ? JSON.stringify(currentMedications) : 'None'}
-
-Return valid JSON with:
-{
-  "soapNote": {
-    "subjective": "Professional medical summary of patient presentation",
-    "objective": "Documented vitals and clinical findings",
-    "assessment": "Diagnostic impressions and stability grading",
-    "plan": "Actionable therapeutic and follow-up plan"
-  },
-  "patientFriendlySummary": "Warm, jargon-free 2-3 sentence overview that the patient can read in their portal"
-}
-Respond with raw JSON only.`;
-
-    const response = await aiClient.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    res.json(parsed);
-  } catch (error) {
-    console.error('Clinical summary error:', error);
-    res.status(500).json({ error: 'Failed to generate clinical summary' });
-  }
-});
-
 // AI Village Assistant Endpoint (Egyptian Arabic & English)
 app.post('/api/village-assistant', async (req: Request, res: Response) => {
   const { question, language, villageName } = req.body || {};
@@ -171,7 +38,7 @@ app.post('/api/village-assistant', async (req: Request, res: Response) => {
   }
 
   const isArabic = language === 'ar' || /[\u0600-\u06FF]/.test(question);
-  const vName = villageName || (isArabic ? 'قرية ىقباس' : 'Noqbas Village');
+  const vName = villageName || (isArabic ? 'قرية نقباس' : 'Noqbas Village');
 
   const fallbackReply = isArabic
     ? `أهلاً بيك يا جاري العزيز في منصة ${vName}! تقدر تحجز كشف في قسم أطباء وعيادات، تطلب دواء من الصيدليات، أو أكل من مطاعم وكافيهات، أو مقاضي البيت من بقالة وسوبر ماركت، وكمان تحجز مواصلات أو دروس ومعلمون أو تتواصل مع الجمعيات الخيرية أو تشوف قسم أخرى. اختار القسم اللي محتاجه من فوق!`
@@ -183,7 +50,7 @@ app.post('/api/village-assistant', async (req: Request, res: Response) => {
   }
 
   try {
-    const prompt = `You are "Emad" (عماد), a friendly, respectful, and practical village assistant for the Egyptian digital community hub "${vName}" (ىقباس | Noqbas).
+    const prompt = `You are "Emad" (عماد), a friendly, respectful, and practical village assistant for the Egyptian digital community hub "${vName}" (نقباس | Noqbas).
 The user is asking: "${question}"
 Preferred language: ${isArabic ? 'Egyptian Colloquial Arabic (عامية مصرية محترمة وبسيطة مفهومة لكل أهل البلد)' : 'English (warm, community-focused, and helpful)'}.
 Currency: Egyptian Pound (EGP / ج.م).
@@ -208,7 +75,7 @@ Give a concise, helpful response (2-3 short sentences) in ${isArabic ? 'Egyptian
 
     const response = await Promise.race([
       aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: prompt,
       }),
       timeoutPromise,
@@ -226,6 +93,7 @@ async function startServer() {
   const isDev = process.env.NODE_ENV !== 'production';
 
   if (isDev) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -239,7 +107,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Vitalis Health server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Noqbas Village server listening on http://0.0.0.0:${PORT}`);
   });
 }
 

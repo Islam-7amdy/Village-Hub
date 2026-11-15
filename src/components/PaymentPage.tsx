@@ -44,7 +44,7 @@ interface PaymentPageProps {
     finalTotalAmountEgp: number;
     instaPaySender?: string;
     instaPayCustomerRef?: string;
-  }) => void;
+  }) => void | Promise<void>;
 }
 
 export const PaymentPage: React.FC<PaymentPageProps> = ({
@@ -83,7 +83,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
     }
   };
 
-  const validateAndPay = (e: React.FormEvent) => {
+  const validateAndPay = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -114,22 +114,32 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
     }
 
     setIsProcessing(true);
-    setTimeout(() => {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 450));
       const suffix = String(Date.now()).slice(-6);
       const isInstaPay = method === 'instapay';
       const transactionRef = isInstaPay ? `NQB-${suffix}` : `COD-${suffix}`;
       const paymentStatus: PaymentStatus = isInstaPay ? 'pending_verification' : 'pending_cod';
-      setIsProcessing(false);
-      onPaymentCompleted({
+      await onPaymentCompleted({
         paymentMethod: method,
         paymentStatus,
         transactionRef,
         codFeeEgp,
         finalTotalAmountEgp: finalTotalEgp,
-        instaPaySender: isInstaPay ? instaHandle.trim() : undefined,
-        instaPayCustomerRef: isInstaPay ? instaRef.trim() : undefined
+        instaPaySender: isInstaPay ? instaHandle.trim().slice(0, 60) : undefined,
+        instaPayCustomerRef: isInstaPay ? instaRef.trim().slice(0, 60) : undefined
       });
-    }, 650);
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : lang === 'ar'
+          ? 'تعذر حفظ الطلب في قاعدة البيانات. تأكد من اتصالك وحالة التحقق من الحساب وحاول مرة أخرى.'
+          : 'Failed to save your order. Please check your connection and account verification, then try again.';
+      setErrorMsg(msg);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const BackArrow = lang === 'ar' ? ArrowRight : ArrowLeft;
@@ -336,6 +346,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
                         <input
                           type="text"
                           dir="ltr"
+                          maxLength={60}
                           value={instaHandle}
                           onChange={(e) => setInstaHandle(e.target.value)}
                           placeholder="010XXXXXXXX"
@@ -349,6 +360,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({
                         <input
                           type="text"
                           dir="ltr"
+                          maxLength={60}
                           value={instaRef}
                           onChange={(e) => setInstaRef(e.target.value)}
                           placeholder="IPN-4481"

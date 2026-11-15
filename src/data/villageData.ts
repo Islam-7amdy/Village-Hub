@@ -177,6 +177,11 @@ export interface BannedPhoneRecord {
   isPermanent: boolean;
 }
 
+export type DemoUserAdminAction =
+  | { type: 'ban'; uid: string; banUntilMs: number; reason: string; isPermanent: boolean }
+  | { type: 'unban'; uid: string }
+  | { type: 'delete'; uid: string };
+
 export interface PlatformPricingConfig {
   adPriceWeekEgp: number;
   adPriceMonthEgp: number;
@@ -1373,7 +1378,7 @@ export const VILLAGE_DOCTORS: DoctorService[] = [
     availableDays: { ar: 'كل يوم ما عدا الجمعة: 9 ص - 3 عصراً', en: 'Sat - Thu: 9:00 AM - 3:00 PM' },
     fee: { ar: '100 ج.م (في العيادة)', en: '100 EGP (Clinic)' },
     supportsHomeVisit: true,
-    avatar: '/src/assets/images/doctor_marcus_vance_1794474296129.jpg'
+    avatar: '/images/doctor_marcus_vance_1794474296129.webp'
   },
   {
     id: 'doc-2',
@@ -1388,7 +1393,7 @@ export const VILLAGE_DOCTORS: DoctorService[] = [
     availableDays: { ar: 'الحد والتلات والخميس: 4 عصراً - 9 بالليل', en: 'Sun, Tue, Thu: 4:00 PM - 9:00 PM' },
     fee: { ar: '150 ج.م', en: '150 EGP' },
     supportsHomeVisit: true,
-    avatar: '/src/assets/images/doctor_sarah_jenkins_1794474295843.jpg'
+    avatar: '/images/doctor_sarah_jenkins_1794474295843.webp'
   },
   {
     id: 'nurse-1',
@@ -1403,7 +1408,7 @@ export const VILLAGE_DOCTORS: DoctorService[] = [
     availableDays: { ar: 'موجودة 24 ساعة للحالات العاجلة', en: 'Daily 24/7 for Injections & Dressing' },
     fee: { ar: '50 ج.م للزيارة', en: '50 EGP per visit' },
     supportsHomeVisit: true,
-    avatar: '/src/assets/images/doctor_sarah_jenkins_1794474295843.jpg'
+    avatar: '/images/doctor_sarah_jenkins_1794474295843.webp'
   }
 ];
 
@@ -1421,7 +1426,7 @@ export const VILLAGE_TECHNICIANS: TechnicianService[] = [
     experienceYears: 18,
     hourlyRate: { ar: '80 ج.م / كشف ومعاينة', en: '80 EGP / Callout' },
     neighborhood: { ar: 'الناحية الغربية ووسط البلد', en: 'West Quarter & Village Square' },
-    avatar: '/src/assets/images/village_technician_electrician_1794475355366.jpg',
+    avatar: '/images/village_technician_electrician_1794475355366.webp',
     bio: {
       ar: 'خبرة 18 سنة في تأسيس شقق العرسان، تصليح القفلات، وتركيب منظم الكهرباء عشان يحمي التلاجات والغسالات.',
       en: '18 years experience in house wiring, voltage stabilizers, breaker panels, and emergency repairs.'
@@ -1440,7 +1445,7 @@ export const VILLAGE_TECHNICIANS: TechnicianService[] = [
     experienceYears: 14,
     hourlyRate: { ar: '70 ج.م / زيارة', en: '70 EGP / Visit' },
     neighborhood: { ar: 'الناحية الشرقية والعزبة', en: 'East Quarter & Farmlands' },
-    avatar: '/src/assets/images/village_technician_electrician_1794475355366.jpg',
+    avatar: '/images/village_technician_electrician_1794475355366.webp',
     bio: {
       ar: 'صيانة مواتير الميه والأوتوماتيك، تسليك بلاعات، وتركيب سباكة الحمامات والمطابخ بأمانة وسرعة.',
       en: 'Water pump repair, pipe leak detection, bathroom & kitchen plumbing with honest pricing.'
@@ -1459,7 +1464,7 @@ export const VILLAGE_TECHNICIANS: TechnicianService[] = [
     experienceYears: 10,
     hourlyRate: { ar: '120 ج.م / صيانة', en: '120 EGP / Service' },
     neighborhood: { ar: 'شارع المدارس والطريق الزراعي', en: 'School Road & Agricultural Rd' },
-    avatar: '/src/assets/images/village_technician_electrician_1794475355366.jpg',
+    avatar: '/images/village_technician_electrician_1794475355366.webp',
     bio: {
       ar: 'شحن فريون تكييفات، غسيل وتنظيف التكييف قبل الصيف، وتصليح تلاجات الديب فريزر في البيت.',
       en: 'AC Freon recharge, seasonal unit cleaning, deep freezers, and water heater servicing.'
@@ -1478,7 +1483,7 @@ export const VILLAGE_TECHNICIANS: TechnicianService[] = [
     experienceYears: 8,
     hourlyRate: { ar: 'معاينة مجانية', en: 'Free Inspection' },
     neighborhood: { ar: 'بيلف كل القرى والعزب', en: 'All Villages & Farms' },
-    avatar: '/src/assets/images/village_technician_electrician_1794475355366.jpg',
+    avatar: '/images/village_technician_electrician_1794475355366.webp',
     bio: {
       ar: 'حلول الطاقة الشمسية لتشغيل طلمبات الري أو إنارة البيوت وقت قطع النور، ببطاريات عمرها طويل.',
       en: 'Off-grid solar inverters for farm irrigation pumps and backup home battery banks.'
@@ -1496,7 +1501,7 @@ export const VILLAGE_FOOD_ITEMS: FoodItem[] = [
     currency: { ar: 'ج.م', en: 'EGP' },
     category: 'bakery',
     restaurantName: { ar: 'فرن ومخبز البركة البلدي', en: 'Al-Baraka Village Bakery' },
-    image: '/src/assets/images/village_fresh_food_bakery_1794475356032.jpg'
+    image: '/images/village_fresh_food_bakery_1794475356032.webp'
   },
   {
     id: 'food-2',
@@ -1507,7 +1512,7 @@ export const VILLAGE_FOOD_ITEMS: FoodItem[] = [
     currency: { ar: 'ج.م', en: 'EGP' },
     category: 'bakery',
     restaurantName: { ar: 'فرن ومخبز البركة البلدي', en: 'Al-Baraka Village Bakery' },
-    image: '/src/assets/images/village_fresh_food_bakery_1794475356032.jpg'
+    image: '/images/village_fresh_food_bakery_1794475356032.webp'
   },
   {
     id: 'food-3',
@@ -1518,7 +1523,7 @@ export const VILLAGE_FOOD_ITEMS: FoodItem[] = [
     currency: { ar: 'ج.م', en: 'EGP' },
     category: 'traditional',
     restaurantName: { ar: 'مطبخ أم سالم للأكل البيتي', en: "Um Salem's Homemade Kitchen" },
-    image: '/src/assets/images/village_fresh_food_bakery_1794475356032.jpg'
+    image: '/images/village_fresh_food_bakery_1794475356032.webp'
   },
   {
     id: 'food-4',
@@ -1529,7 +1534,7 @@ export const VILLAGE_FOOD_ITEMS: FoodItem[] = [
     currency: { ar: 'ج.م', en: 'EGP' },
     category: 'grill',
     restaurantName: { ar: 'مشويات الوادي على الفحم', en: 'Al-Wadi Charcoal Grill' },
-    image: '/src/assets/images/village_fresh_food_bakery_1794475356032.jpg'
+    image: '/images/village_fresh_food_bakery_1794475356032.webp'
   }
 ];
 

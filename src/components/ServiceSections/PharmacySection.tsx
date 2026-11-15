@@ -100,7 +100,7 @@ export const PharmacySection: React.FC<PharmacySectionProps> = ({
       <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-transparent border border-emerald-200 dark:border-emerald-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-3">
           <img
-            src="/src/assets/images/village_pharmacy_health_1794475355831.jpg"
+            src="/images/village_pharmacy_health_1794475355831.webp"
             alt="Pharmacy"
             referrerPolicy="no-referrer"
             className="w-12 h-12 rounded-xl object-cover shrink-0 border border-emerald-300 dark:border-emerald-800"

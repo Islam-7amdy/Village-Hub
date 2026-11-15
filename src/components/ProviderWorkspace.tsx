@@ -106,12 +106,14 @@ export const ProviderWorkspace: React.FC<ProviderWorkspaceProps> = ({
   banUntilMs,
   onUpdateOrderStatus,
   onUpdateAvailability,
-  nowMs = Date.now(),
+  nowMs,
   onOpenNotifications,
   onOpenAuth
 }) => {
   const t = TRANSLATIONS[lang];
   const theme = getVillageTheme(activeVillage.colorCode);
+  const [mountNowMs] = useState<number>(() => Date.now());
+  const effectiveNowMs = nowMs ?? mountNowMs;
 
   const [workspaceTab, setWorkspaceTab] = useState<'orders' | 'ledger' | 'activity'>('orders');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed' | 'cancelled'>('all');
@@ -166,8 +168,8 @@ export const ProviderWorkspace: React.FC<ProviderWorkspaceProps> = ({
   ]);
 
   const currentLiveAvailability = useMemo(
-    () => evaluateProviderAvailability(providerListing, nowMs),
-    [providerListing, nowMs]
+    () => evaluateProviderAvailability(providerListing, effectiveNowMs),
+    [providerListing, effectiveNowMs]
   );
 
   const previewDraftAvailability = useMemo(
