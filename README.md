@@ -6,7 +6,7 @@ A web platform for the residents of Noqbas village and neighbouring villages. It
 
 ## Prerequisites
 
-- **Node.js** 24.12 or newer (several dependencies, such as the Firebase SDK, declare `>=24.12.0`; `firebase-admin` needs at least 22)
+- **Node.js** 20.11 or newer (24 also works)
 - **npm** (or **bun**)
 - A **Firebase** project with **Firestore Database** and **Authentication** enabled (project settings live in `firebase-applet-config.json`)
 
