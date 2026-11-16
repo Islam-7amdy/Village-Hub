@@ -13,8 +13,8 @@ A web platform for the residents of Noqbas village and neighbouring villages. It
 ## Quick start: run it locally and see it
 
 ```bash
-npm install            # or: bun install
-cp .env.example .env   # all values are optional for a first run
+npm install --legacy-peer-deps   # or: bun install
+cp .env.example .env             # all values are optional for a first run
 npm run dev
 ```
 
