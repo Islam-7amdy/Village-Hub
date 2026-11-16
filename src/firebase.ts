@@ -16,7 +16,7 @@ let db: Firestore;
 try {
   db = initializeFirestore(
     app,
-    { experimentalAutoDetectLongPolling: true },
+    typeof window !== 'undefined' ? { experimentalForceLongPolling: true } : {},
     firebaseConfig.firestoreDatabaseId
   );
 } catch {
