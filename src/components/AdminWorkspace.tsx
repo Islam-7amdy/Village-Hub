@@ -723,7 +723,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
     if (!stats) return;
     const avail = evaluateProviderAvailability(p, nowMs);
     const lines: string[] = [];
-    lines.push([csvCell('تقرير أداء مقدم خدمة - منصة قرية نقباس'), csvCell(new Date().toISOString().split('T')[0])].join(','));
+    lines.push([csvCell('تقرير أداء مقدم خدمة - منصة بلدنا'), csvCell(new Date().toISOString().split('T')[0])].join(','));
     lines.push([csvCell('الاسم'), csvCell(p.nameAr), csvCell('التخصص'), csvCell(p.specialtyAr), csvCell('رقم الهاتف'), csvCell(p.phone)].join(','));
     lines.push([csvCell('حالة الاعتماد'), csvCell(p.status), csvCell('حالة العمل الآن'), csvCell(avail.isOpen ? 'مفتوح' : 'مغلق'), csvCell('التقييم'), csvCell(stats.avgRating)].join(','));
     lines.push([csvCell('المشاهدات'), csvCell(stats.viewsCount), csvCell('نسبة التحويل %'), csvCell(`${stats.conversionRate}%`), csvCell('إجمالي الطلبات'), csvCell(stats.totalOrders)].join(','));
@@ -754,7 +754,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `noqbas-provider-report-${p.id}-${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `village-service-hub-provider-report-${p.id}-${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1152,8 +1152,8 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
       const updatedVillage: VillageConfig = {
         ...activeVillage,
         id: 'noqbas',
-        nameAr: 'قرية نقباس',
-        nameEn: 'Noqbas Village',
+        nameAr: 'بلدنا',
+        nameEn: 'Village Service Hub',
         baseDeliveryFeeEgp: Math.max(0, Number(editBaseFee) || 0),
         perKmFeeEgp: Math.max(0, Number(editPerKmFee) || 0),
         colorCode: editColorCode,
@@ -1185,7 +1185,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
         handleFirestoreError(err, OperationType.WRITE, 'villages/noqbas');
       }
       onVillageUpdated(updatedVillage);
-      showToast(lang === 'ar' ? 'تم حفظ إعدادات قرية نقباس ✓' : 'Noqbas settings saved ✓');
+      showToast(lang === 'ar' ? 'تم حفظ إعدادات منصة بلدنا ✓' : 'Platform settings saved ✓');
     } finally {
       setBusyId(null);
     }
@@ -1228,7 +1228,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
     { id: 'orders', labelAr: 'الطلبات و InstaPay', labelEn: 'Orders & Dispatch', Icon: PackageCheck, badge: pendingInstaPayVerifications.length },
     { id: 'settlement', labelAr: 'التسويات المالية', labelEn: 'Settlements', Icon: Wallet },
     { id: 'users', labelAr: 'المستخدمون والتصفح', labelEn: 'Users & Activity', Icon: Users },
-    { id: 'village_settings', labelAr: 'إعدادات قرية نقباس', labelEn: 'Noqbas Settings', Icon: MapPin }
+    { id: 'village_settings', labelAr: 'إعدادات منصة بلدنا', labelEn: 'Platform Settings', Icon: MapPin }
   ];
 
   const activeNavMeta = navItems.find((n) => n.id === activeTab) || navItems[0];
@@ -1248,7 +1248,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 truncate">
               <span className="font-bold text-slate-900 dark:text-white">
-                {lang === 'ar' ? 'إدارة منصة قرية نقباس' : 'Noqbas Admin Console'}
+                {lang === 'ar' ? 'إدارة منصة بلدنا' : 'Village Service Hub Admin'}
               </span>
               <span aria-hidden="true">/</span>
               <span className="truncate font-semibold text-amber-700 dark:text-amber-400">
@@ -1676,8 +1676,8 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                   </h2>
                   <p className="text-xs text-slate-500">
                     {lang === 'ar'
-                      ? 'إضافة أقسام جديدة أو تعديل أسماء وألوان وترتيب وإظهار الأقسام الحالية في قرية نقباس'
-                      : 'Add custom sections or edit titles, colors, order, and visibility across Noqbas'}
+                      ? 'إضافة أقسام جديدة أو تعديل أسماء وألوان وترتيب وإظهار الأقسام الحالية في منصة بلدنا'
+                      : 'Add custom sections or edit titles, colors, order, and visibility across Village Service Hub'}
                   </p>
                 </div>
 
@@ -3099,7 +3099,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                 />
                 <div>
                   <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                    {lang === 'ar' ? 'إعدادات وهوية قرية نقباس' : 'Noqbas Village Configuration'}
+                    {lang === 'ar' ? 'إعدادات وهوية منصة بلدنا' : 'Village Service Hub Configuration'}
                   </h2>
                   <p className="text-slate-500">
                     {lang === 'ar'
@@ -3199,7 +3199,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                   disabled={busyId === 'save-noqbas'}
                   className="min-h-[40px] px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
                 >
-                  {lang === 'ar' ? 'حفظ إعدادات قرية نقباس' : 'Save Settings'}
+                  {lang === 'ar' ? 'حفظ إعدادات منصة بلدنا' : 'Save Settings'}
                 </button>
               </div>
             </form>
@@ -3220,7 +3220,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-[11px] font-bold text-amber-600">
-                  {lang === 'ar' ? 'تقرير أداء تفصيلي — منصة قرية نقباس' : 'Provider Performance Report — Noqbas'}
+                  {lang === 'ar' ? 'تقرير أداء تفصيلي — منصة بلدنا' : 'Provider Performance Report — Village Service Hub'}
                 </div>
                 <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
                   {lang === 'ar' ? reportProvider.nameAr : reportProvider.nameEn} ·{' '}

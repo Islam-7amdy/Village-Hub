@@ -5,7 +5,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
 import {
   applicationDefault,
   cert,
@@ -163,26 +162,9 @@ initFirebaseAdmin();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-const MAX_ASSISTANT_QUESTION_CHARS = 300;
 
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '32kb' }));
-
-const apiKey = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-4-hydrogen';
-let aiClient: GoogleGenAI | null = null;
-if (apiKey) {
-  aiClient = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build'
-      }
-    }
-  });
-  // An invalid GEMINI_MODEL is otherwise invisible (failures fall back to a canned reply), so log it.
-  console.log(`Gemini assistant enabled (model: ${GEMINI_MODEL})`);
-}
 
 interface VerifiedAuthUser {
   uid: string;
@@ -307,14 +289,6 @@ async function requireFirebaseAuth(
   next();
 }
 
-const assistantLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many assistant requests, please wait before trying again.' }
-});
-
 const banCheckLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
@@ -330,88 +304,6 @@ const adminActionLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many admin requests, please slow down.' }
 });
-
-// AI Village Assistant Endpoint (Authenticated + Rate-limited + Max 300 chars)
-app.post(
-  '/api/village-assistant',
-  assistantLimiter,
-  requireFirebaseAuth,
-  async (req: AuthenticatedRequest, res: Response) => {
-    const rawQuestion = req.body?.question;
-    const language = req.body?.language;
-    const villageName = typeof req.body?.villageName === 'string' ? req.body.villageName.trim().slice(0, 80) : '';
-
-    if (typeof rawQuestion !== 'string') {
-      res.status(400).json({ error: 'Question must be a non-empty string' });
-      return;
-    }
-
-    const cleanQuestion = rawQuestion.trim();
-    if (!cleanQuestion) {
-      res.status(400).json({ error: 'Question is required' });
-      return;
-    }
-    if (cleanQuestion.length > MAX_ASSISTANT_QUESTION_CHARS) {
-      res.status(400).json({
-        error: `Question exceeds maximum length of ${MAX_ASSISTANT_QUESTION_CHARS} characters`
-      });
-      return;
-    }
-
-    const isArabic = language === 'ar' || /[\u0600-\u06FF]/.test(cleanQuestion);
-    const vName = villageName || (isArabic ? 'قرية نقباس' : 'Noqbas Village');
-
-    const fallbackReply = isArabic
-      ? `أهلاً بيك يا جاري العزيز في منصة ${vName}! تقدر تتصفح أقسام أطباء وعيادات، صيدليات، مطاعم وكافيهات، بقالة وسوبر ماركت، فنيين وحرفيين، مواصلات، دروس ومعلمون، الجمعيات الخيرية أو قسم أخرى وتختار مقدم الخدمة المعتمد الأقرب ليك من القائمة.`
-      : `Welcome to ${vName}! You can browse Doctors & Clinics, Pharmacies, Restaurants & Cafes, Grocery & Supermarket, Technicians, Rides, Tutoring, Charities, or Other Services directly from the category tabs to choose an approved local provider.`;
-
-    if (!aiClient) {
-      res.json({ answer: fallbackReply });
-      return;
-    }
-
-    try {
-      const prompt = `You are "Emad" (عماد), a friendly, respectful, and practical village assistant for the Egyptian digital community hub "${vName}" (نقباس | Noqbas).
-The resident is asking: "${cleanQuestion}"
-Preferred language: ${isArabic ? 'Egyptian Colloquial Arabic (عامية مصرية محترمة وبسيطة مفهومة لكل أهل البلد)' : 'English (warm, community-focused, and helpful)'}.
-Currency: Egyptian Pound (EGP / ج.م).
-Important rules:
-- Do NOT invent specific doctor names, technician names, phone numbers, or prices that are not provided by the user.
-- Guide the resident to the matching category tab in the platform so they can browse currently registered and approved local providers, check open/closed availability, and place their booking or order safely.
-
-Platform categories available:
-1. أطباء وعيادات (Doctors & Clinics): Clinic visits, consultations, and home nursing appointments.
-2. صيدليات (Pharmacies): Medication orders, health supplies, and prescription uploads with delivery or pickup.
-3. مطاعم وكافيهات (Restaurants & Cafes): Local meals, bakeries, grills, and village kitchens.
-4. فنيون وحرفيون (Technicians & Craftsmen): Electricians, plumbers, HVAC, carpentry, and home maintenance.
-5. مواصلات (Transportation & Rides): Local rides and inter-village commutes.
-6. بقالة وسوبر ماركت (Grocery & Supermarket): Daily pantry staples, dairy, and fresh produce.
-7. دروس ومعلمون (Tutoring & Teachers): Academic tutoring and study circles.
-8. الجمعيات الخيرية (Charities): Community aid, medical convoys, and charitable support.
-9. أخرى (Other Services): Printing, electronics repair, laundry, and miscellaneous village services.
-10. إعلانات أهل القرية (Classified Ads): Approved neighborhood offers and listings on the Home tab.
-
-Give a concise, helpful response (2-3 short sentences) in ${isArabic ? 'Egyptian Colloquial Arabic' : 'English'} guiding them to the right section.`;
-
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Gemini request timeout')), 12000)
-      );
-
-      const response = await Promise.race([
-        aiClient.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: prompt
-        }),
-        timeoutPromise
-      ]);
-
-      res.json({ answer: response.text || fallbackReply });
-    } catch (error) {
-      console.error(`Village assistant error (model: ${GEMINI_MODEL}):`, error);
-      res.json({ answer: fallbackReply });
-    }
-  }
-);
 
 // Pre-SMS / Pre-Auth phone ban check (active when Firebase Admin SDK is configured)
 app.post('/api/auth/check-ban', banCheckLimiter, async (req: Request, res: Response) => {
@@ -601,7 +493,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Noqbas Village server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Village Service Hub server listening on http://0.0.0.0:${PORT}`);
   });
 }
 

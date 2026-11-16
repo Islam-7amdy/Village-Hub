@@ -68,7 +68,7 @@ export const UniversalBookingModal: React.FC<UniversalBookingModalProps> = ({
       providerName,
       customerName: finalName,
       customerPhone: finalPhone,
-      address: address.trim() || (lang === 'ar' ? 'قرية نقباس - الشارع العمومي' : 'Main Village Street'),
+      address: address.trim() || (lang === 'ar' ? 'الشارع العمومي بالبلد' : 'Main Village Street'),
       subtotalEgp: feeEgp,
       totalAmountEgp: feeEgp,
       date,

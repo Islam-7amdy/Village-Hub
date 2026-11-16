@@ -87,7 +87,6 @@ interface VillageHeaderProps {
   onOpenProviderOrders?: () => void;
   onOpenNotifications: () => void;
   onOpenEmergency: () => void;
-  onOpenAssistant: () => void;
   activeVillage: VillageConfig;
   isSignedIn: boolean;
   isAdmin: boolean;
@@ -97,6 +96,8 @@ interface VillageHeaderProps {
   sections?: ServiceSectionConfig[];
   onOpenAuth: () => void;
   onOpenAdminPanel: () => void;
+  onOpenAbout: () => void;
+  onOpenContact: () => void;
 }
 
 export const VillageHeader: React.FC<VillageHeaderProps> = ({
@@ -117,7 +118,6 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
   onOpenProviderOrders,
   onOpenNotifications,
   onOpenEmergency,
-  onOpenAssistant,
   activeVillage,
   isSignedIn,
   isAdmin,
@@ -126,7 +126,9 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
   pendingAdminCount,
   sections,
   onOpenAuth,
-  onOpenAdminPanel
+  onOpenAdminPanel,
+  onOpenAbout,
+  onOpenContact
 }) => {
   const t = TRANSLATIONS[lang];
   const theme = getVillageTheme(activeVillage.colorCode);
@@ -161,7 +163,7 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Top Row: Village Branding + Switcher + Desktop Search + Actions */}
         <div className="flex items-center justify-between gap-2.5 h-16">
-          {/* Zone 1: Single Village Logo + Name (قرية نقباس) */}
+          {/* Zone 1: Single Platform Logo + Name (بلدنا) */}
           <div className="flex items-center gap-2 shrink-0 min-w-0">
             <button
               onClick={() => onTabChange('all')}
@@ -326,14 +328,29 @@ export const VillageHeader: React.FC<VillageHeaderProps> = ({
               </span>
             </button>
 
-            {/* AI Assistant */}
+            {/* About App & Contact Us clean text links */}
             <button
-              onClick={onOpenAssistant}
-              title={t.aiAssistant}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              type="button"
+              onClick={onOpenAbout}
+              className={`hidden md:inline-flex items-center px-2 py-1.5 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors hover:underline ${
+                activeTab === 'about'
+                  ? `${theme.text} underline underline-offset-4`
+                  : 'text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white'
+              }`}
             >
-              <Sparkles className={`w-3.5 h-3.5 ${theme.text}`} />
-              <span className="hidden xl:inline">{t.aiAssistant}</span>
+              {t.aboutApp}
+            </button>
+
+            <button
+              type="button"
+              onClick={onOpenContact}
+              className={`hidden md:inline-flex items-center px-2 py-1.5 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors hover:underline ${
+                activeTab === 'contact'
+                  ? `${theme.text} underline underline-offset-4`
+                  : 'text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {t.contactUs}
             </button>
 
             {/* Cart */}

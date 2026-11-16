@@ -1,8 +1,8 @@
-# Noqbas Village Services Hub (نقباس)
+# Village Service Hub (بلدنا)
 
-A web platform for the residents of Noqbas village and neighbouring villages. It connects residents with local service providers (doctors, pharmacies, restaurants, groceries, technicians, rides, tutoring, charities and more) and includes booking, a shopping cart, order tracking, payment by InstaPay or cash on delivery, and dedicated dashboards for providers and administrators.
+A unified community and services web platform for village residents (**بلدنا** / **Village Service Hub**). It connects residents with local service providers (doctors, pharmacies, restaurants, groceries, technicians, rides, tutoring, charities and more) and includes booking, a shopping cart, order tracking, payment by InstaPay or cash on delivery, and dedicated dashboards for providers and administrators.
 
-**Stack:** React + Vite + Express + Firebase (Firestore and Authentication), with an optional Gemini-powered village assistant.
+**Stack:** React + Vite + Express + Firebase (Firestore and Authentication).
 
 ## Prerequisites
 
@@ -38,8 +38,6 @@ Real sign-up uses phone number verification (SMS code) through Firebase. For tha
 Copy `.env.example` to `.env` and fill in what you need:
 
 - `PORT`: server port (default `3000`)
-- `GEMINI_API_KEY`: Gemini API key for the village assistant (optional; without it the assistant returns a built-in fallback reply)
-- `GEMINI_MODEL`: Gemini model used by the assistant (default `gemini-4-hydrogen`). Check the name against Google's official model list. The server prints the model at startup, and if the name is wrong the assistant silently falls back to the canned reply and the error appears in the server log.
 - `APP_URL`: public URL of the app
 - `VITE_RECAPTCHA_SITE_KEY`: reCAPTCHA v3 site key used to enable Firebase App Check in the browser (optional)
 - `FIREBASE_SERVICE_ACCOUNT_JSON`: Firebase Admin SDK service account as JSON (optional; enables full token verification, permanent user deletion from Auth, and the ban check before SMS is sent). `GOOGLE_APPLICATION_CREDENTIALS` also works.
@@ -56,7 +54,7 @@ Copy `.env.example` to `.env` and fill in what you need:
    ```bash
    npm start
    ```
-   It runs with `NODE_ENV=production`, serves the static files from `dist/`, and exposes the API routes `/api/village-assistant`, `/api/auth/check-ban` and `/api/admin/delete-user`.
+   It runs with `NODE_ENV=production`, serves the static files from `dist/`, and exposes the API routes `/api/auth/check-ban` and `/api/admin/delete-user`.
 
 ## Available scripts
 
@@ -86,6 +84,6 @@ Copy `.env.example` to `.env` and fill in what you need:
    - Quickly check whether a phone number is banned before an SMS verification code is sent (`/api/auth/check-ban`).
 
 4. **Protect the Firebase API key and SMS quota (required in the console):**
-   - **Restrict the browser key (HTTP referrers):** Google Cloud Console → APIs & Services → Credentials → restrict the browser key to your approved site domains only (for example `noqbas.example.com/*`).
+   - **Restrict the browser key (HTTP referrers):** Google Cloud Console → APIs & Services → Credentials → restrict the browser key to your approved site domains only (for example `village-service-hub.example.com/*`).
    - **Enable Firebase App Check:** register your site with reCAPTCHA v3 in Firebase Console → App Check, set `VITE_RECAPTCHA_SITE_KEY` in the environment, then turn on enforcement for Firestore and Authentication.
    - **Limit SMS regions:** Firebase Console → Authentication → Settings → SMS region policy → choose **Allow only** and select Egypt (`+20`) to prevent international SMS abuse from draining your quota.

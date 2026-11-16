@@ -93,18 +93,25 @@ export function useVillagePlatform({
       (snap) => {
         if (snap.exists()) {
           const data = snap.data() as Partial<VillageConfig>;
+          const rawNameAr = (data.nameAr || '').trim();
+          const rawNameEn = (data.nameEn || '').trim();
+          const rawDescAr = (data.descriptionAr || '').trim();
+          const rawDescEn = (data.descriptionEn || '').trim();
           setActiveVillage({
             ...DEFAULT_VILLAGES[0],
             id: data.id || 'noqbas',
-            nameAr: data.nameAr || 'قرية نقباس',
-            nameEn: data.nameEn || 'Noqbas Village',
+            nameAr: !rawNameAr || /نقباس|ىقباس|أهل البلد/.test(rawNameAr) ? 'بلدنا' : rawNameAr,
+            nameEn: !rawNameEn || /noqbas/i.test(rawNameEn) ? 'Village Service Hub' : rawNameEn,
             governorateAr: data.governorateAr || DEFAULT_VILLAGES[0].governorateAr,
             governorateEn: data.governorateEn || DEFAULT_VILLAGES[0].governorateEn,
-            descriptionAr: (data.descriptionAr || DEFAULT_VILLAGES[0].descriptionAr).replace(
-              /ىقباس/g,
-              'نقباس'
-            ),
-            descriptionEn: data.descriptionEn || DEFAULT_VILLAGES[0].descriptionEn,
+            descriptionAr:
+              !rawDescAr || /نقباس|ىقباس|أهل البلد/.test(rawDescAr)
+                ? DEFAULT_VILLAGES[0].descriptionAr
+                : rawDescAr,
+            descriptionEn:
+              !rawDescEn || /noqbas/i.test(rawDescEn)
+                ? DEFAULT_VILLAGES[0].descriptionEn
+                : rawDescEn,
             baseDeliveryFeeEgp: Number(
               data.baseDeliveryFeeEgp ?? DEFAULT_VILLAGES[0].baseDeliveryFeeEgp
             ),
@@ -118,7 +125,7 @@ export function useVillagePlatform({
         }
       },
       (err) => {
-        console.warn('Noqbas village listener warning:', err.message);
+        console.warn('Village config listener warning:', err.message);
       }
     );
 
@@ -495,7 +502,7 @@ export function useVillagePlatform({
       const savedAd: VillageAd = {
         id: adId,
         ownerId: existing?.ownerId || firebaseUser?.uid || 'admin',
-        authorName: existing?.authorName || payload.authorName || 'إدارة قرية نقباس',
+        authorName: existing?.authorName || payload.authorName || 'إدارة منصة بلدنا',
         villageId: payload.villageId || existing?.villageId || activeVillage.id,
         title: payload.title.trim().slice(0, 120),
         description: payload.description.trim().slice(0, 600),

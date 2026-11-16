@@ -36,7 +36,6 @@ import { UniversalBookingModal } from './components/Modals/UniversalBookingModal
 import { PrescriptionUploadModal } from './components/Modals/PrescriptionUploadModal';
 import { CartModal } from './components/Modals/CartModal';
 import { EmergencyDirectoryModal } from './components/Modals/EmergencyDirectoryModal';
-import { VillageAssistantModal } from './components/Modals/VillageAssistantModal';
 import { NotificationsModal } from './components/Modals/NotificationsModal';
 import { ReviewModal } from './components/Modals/ReviewModal';
 import { ProviderReviewsModal } from './components/Modals/ProviderReviewsModal';
@@ -46,6 +45,8 @@ import { ProviderOrdersModal } from './components/Modals/ProviderOrdersModal';
 import { PaymentPage } from './components/PaymentPage';
 import { ProviderWorkspace } from './components/ProviderWorkspace';
 import { AdminWorkspace } from './components/AdminWorkspace';
+import { AboutPage } from './components/AboutPage';
+import { ContactPage } from './components/ContactPage';
 
 import { Briefcase, AlertCircle, Ban, Phone } from 'lucide-react';
 
@@ -162,7 +163,6 @@ function AppShell() {
   const [isCartModalOpen, setIsCartModalOpen] = useState(false);
   const [isProviderOrdersOpen, setIsProviderOrdersOpen] = useState(false);
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
-  const [isAssistantModalOpen, setIsAssistantModalOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [isProviderReviewsModalOpen, setIsProviderReviewsModalOpen] = useState(false);
@@ -542,7 +542,6 @@ function AppShell() {
         onOpenProviderOrders={() => setIsProviderOrdersOpen(true)}
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenEmergency={() => setIsEmergencyModalOpen(true)}
-        onOpenAssistant={() => requireAuth(() => setIsAssistantModalOpen(true))}
         activeVillage={activeVillage}
         isSignedIn={isSignedIn}
         isAdmin={isAdmin}
@@ -551,9 +550,51 @@ function AppShell() {
         pendingAdminCount={pendingAdminCount}
         onOpenAuth={() => openAuthModal('login')}
         onOpenAdminPanel={() => openAuthModal('login')}
+        onOpenAbout={() => {
+          setActiveTab('about');
+          setSearchQuery('');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onOpenContact={() => {
+          setActiveTab('contact');
+          setSearchQuery('');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
+        {activeTab === 'about' ? (
+          <AboutPage
+            lang={lang}
+            activeVillage={activeVillage}
+            activeSectionsCount={mergedSections.filter((s) => s.isEnabled !== false).length}
+            approvedProvidersCount={approvedProviders.length}
+            isSignedIn={isSignedIn}
+            onBackHome={() => {
+              setActiveTab('all');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenRegister={() => openAuthModal('register')}
+            onOpenEmergency={() => setIsEmergencyModalOpen(true)}
+            onOpenContact={() => {
+              setActiveTab('contact');
+              setSearchQuery('');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        ) : activeTab === 'contact' ? (
+          <ContactPage
+            lang={lang}
+            activeVillage={activeVillage}
+            defaultName={effectiveProfile?.displayName || firebaseUser?.displayName || ''}
+            defaultPhone={effectiveProfile?.phone || ''}
+            onBackHome={() => {
+              setActiveTab('all');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        ) : (
+          <>
         <VillageHeroBanner
           lang={lang}
           activeTab={activeTab}
@@ -943,6 +984,8 @@ function AppShell() {
 
             return null;
           })}
+          </>
+        )}
       </main>
 
       <AuthModal
@@ -1034,13 +1077,6 @@ function AppShell() {
         lang={lang}
       />
 
-      <VillageAssistantModal
-        isOpen={isAssistantModalOpen}
-        onClose={() => setIsAssistantModalOpen(false)}
-        lang={lang}
-        activeVillageName={activeVillageName}
-      />
-
       <NotificationsModal
         isOpen={isNotificationsOpen}
         onClose={() => setIsNotificationsOpen(false)}
@@ -1088,7 +1124,31 @@ function AppShell() {
             <span>{t.appTagline}</span>
           </div>
 
-          <div className="flex items-center gap-4 text-xs">
+          <div className="flex flex-wrap items-center justify-center gap-4 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('about');
+                setSearchQuery('');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="text-slate-700 dark:text-slate-300 font-semibold hover:underline cursor-pointer"
+            >
+              {t.aboutApp}
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('contact');
+                setSearchQuery('');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="text-slate-700 dark:text-slate-300 font-semibold hover:underline cursor-pointer"
+            >
+              {t.contactUs}
+            </button>
+            <span>·</span>
             <button
               onClick={() => openAuthModal('login')}
               className="text-slate-700 dark:text-slate-300 font-semibold hover:underline cursor-pointer"
@@ -1101,13 +1161,6 @@ function AppShell() {
               className="text-rose-600 dark:text-rose-400 font-semibold hover:underline cursor-pointer"
             >
               {t.emergency}
-            </button>
-            <span>·</span>
-            <button
-              onClick={() => requireAuth(() => setIsAssistantModalOpen(true))}
-              className={`${theme.text} font-semibold hover:underline cursor-pointer`}
-            >
-              {t.aiAssistant}
             </button>
           </div>
         </div>

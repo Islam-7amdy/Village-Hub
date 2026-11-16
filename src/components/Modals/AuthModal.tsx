@@ -1188,8 +1188,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 : showUnauthOrFlowView
                 ? authTab === 'login'
                   ? lang === 'ar'
-                    ? 'ادخل برقم الموبايل وكلمة السر مباشرة — قرية نقباس'
-                    : 'Sign in with your mobile phone & password — Noqbas Village'
+                    ? 'ادخل برقم الموبايل وكلمة السر مباشرة — منصة بلدنا'
+                    : 'Sign in with your mobile phone & password — Village Service Hub'
                   : lang === 'ar'
                   ? 'التسجيل بالاسم ورقم الهاتف والعنوان وكلمة السر — مع تأكيد الهاتف برسالة SMS'
                   : 'Register with Name, Phone, Address & Password — verified via SMS OTP'
@@ -1597,8 +1597,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-slate-800 dark:text-slate-200">
                           {lang === 'ar'
-                            ? 'حسابات التجربة السريعة (قرية نقباس)'
-                            : 'Quick Test Accounts (Noqbas Village)'}
+                            ? 'حسابات التجربة السريعة (بلدنا)'
+                            : 'Quick Test Accounts (Village Service Hub)'}
                         </span>
                         <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                           {lang === 'ar' ? 'بيئة التطوير فقط' : 'DEV Mode Only'}
@@ -1773,11 +1773,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <div className="flex items-center justify-between mb-1">
                       <label className="font-semibold text-slate-700 dark:text-slate-300">
                         <Home className="w-3 h-3 inline me-1" />
-                        {lang === 'ar' ? 'العنوان بالتفصيل في قرية نقباس *' : 'Full Address in Noqbas *'}
+                        {lang === 'ar' ? 'العنوان بالتفصيل في البلد *' : 'Full Village Address *'}
                       </label>
                       <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1">
                         <MapPin className="w-3 h-3" />
-                        {lang === 'ar' ? 'قرية نقباس' : 'Noqbas Village'}
+                        {lang === 'ar' ? 'بلدنا' : 'Village Service Hub'}
                       </span>
                     </div>
                     <input
@@ -1966,8 +1966,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       </div>
                       <div className="text-[11px] text-amber-700 dark:text-amber-300">
                         {lang === 'ar'
-                          ? 'تقدر تتابع الإحصائيات المفصلة، المستخدمين، الحظر، الإعلانات، وإعدادات قرية نقباس.'
-                          : 'View analytics, manage users/bans, moderate ads, and customize Noqbas.'}
+                          ? 'تقدر تتابع الإحصائيات المفصلة، المستخدمين، الحظر، الإعلانات، وإعدادات منصة بلدنا.'
+                          : 'View analytics, manage users/bans, moderate ads, and customize Village Service Hub.'}
                       </div>
                     </div>
                   </div>
@@ -2152,11 +2152,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div className="flex items-center justify-between mb-1">
                     <label className="font-semibold text-slate-700 dark:text-slate-300">
                       <Home className="w-3 h-3 inline me-1" />
-                      {lang === 'ar' ? 'العنوان بالتفصيل في قرية نقباس *' : 'Full Address in Noqbas *'}
+                      {lang === 'ar' ? 'العنوان بالتفصيل في البلد *' : 'Full Village Address *'}
                     </label>
                     <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1">
                       <MapPin className="w-3 h-3" />
-                      {lang === 'ar' ? 'قرية نقباس' : 'Noqbas Village'}
+                      {lang === 'ar' ? 'بلدنا' : 'Village Service Hub'}
                     </span>
                   </div>
                   <input
@@ -2229,7 +2229,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         rows={2}
                         value={serviceBio}
                         onChange={(e) => setServiceBio(e.target.value)}
-                        placeholder={lang === 'ar' ? 'احكي لأهل البلد عن خبرتك ومواعيد الشغل...' : 'Describe your experience and hours...'}
+                        placeholder={lang === 'ar' ? 'احكي لأهالي بلدنا عن خبرتك ومواعيد الشغل...' : 'Describe your experience and hours...'}
                         className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
                       />
                     </div>

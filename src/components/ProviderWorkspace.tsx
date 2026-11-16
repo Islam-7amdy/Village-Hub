@@ -362,7 +362,7 @@ export const ProviderWorkspace: React.FC<ProviderWorkspaceProps> = ({
   const activityDistrict =
     (lang === 'ar' ? providerListing?.neighborhoodAr : providerListing?.neighborhoodEn) ||
     providerProfile.neighborhood ||
-    (lang === 'ar' ? 'قرية نقباس' : 'Noqbas Village');
+    (lang === 'ar' ? 'بلدنا' : 'Village Service Hub');
   const activityBio =
     (lang === 'ar' ? providerListing?.bioAr : providerListing?.bioEn) ||
     providerProfile.serviceBio ||

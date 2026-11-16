@@ -400,8 +400,8 @@ export function useBookings({
           title: lang === 'ar' ? 'تم تفعيل حسابك كمقدم خدمة' : 'Provider Account Approved',
           body:
             lang === 'ar'
-              ? 'مبروك! نشاطك ظاهر دلوقتي لكل أهالي قرية نقباس.'
-              : 'Your service profile is now live across Noqbas Village.'
+              ? 'مبروك! نشاطك ظاهر دلوقتي لكل أهالي بلدنا على المنصة.'
+              : 'Your service profile is now live on Village Service Hub.'
         });
       } else if (effectiveProfile.providerStatus === 'pending') {
         list.push({

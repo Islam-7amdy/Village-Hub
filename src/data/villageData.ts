@@ -1035,12 +1035,12 @@ export const DEFAULT_DISTRICTS: VillageDistrict[] = [
 export const DEFAULT_VILLAGES: VillageConfig[] = [
   {
     id: 'noqbas',
-    nameAr: 'قرية نقباس',
-    nameEn: 'Noqbas Village',
+    nameAr: 'بلدنا',
+    nameEn: 'Village Service Hub',
     governorateAr: 'مركز بنها - القليوبية',
     governorateEn: 'Banha - Qalyubia',
-    descriptionAr: 'دكاترة، صيدليات، مطاعم، صنايعية، بقالة، دروس وجمعيات خيرية لأهالي نقباس',
-    descriptionEn: 'Doctors, pharmacies, restaurants, craftsmen, grocery, tutoring & charity for Noqbas',
+    descriptionAr: 'دكاترة، صيدليات، مطاعم، صنايعية، بقالة، دروس وجمعيات خيرية لكل أهالي بلدنا',
+    descriptionEn: 'Doctors, pharmacies, restaurants, craftsmen, grocery, tutoring & charity for the whole village community',
     baseDeliveryFeeEgp: 10,
     perKmFeeEgp: 5,
     colorCode: 'amber',
