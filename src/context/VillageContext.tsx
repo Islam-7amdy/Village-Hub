@@ -7,7 +7,14 @@ import { useBookings } from '../hooks/useBookings';
 
 export function useVillageState() {
   const [lang, setLang] = useState<Language>('ar');
-  const [darkMode, setDarkMode] = useState<boolean>(false);
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    try {
+      const saved = window.localStorage.getItem('noqbas_dark_mode');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -54,6 +61,12 @@ export function useVillageState() {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
+    }
+    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
+    try {
+      window.localStorage.setItem('noqbas_dark_mode', String(darkMode));
+    } catch {
+      // Ignore storage quota errors
     }
   }, [darkMode]);
 
