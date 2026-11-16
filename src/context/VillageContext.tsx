@@ -156,6 +156,7 @@ export function useVillageState() {
     mergedProviders: providersState.mergedProviders,
     firestoreAds: platformState.firestoreAds,
     allAds: platformState.allAds,
+    firestoreAnnouncements: platformState.firestoreAnnouncements,
     trackAnalyticsEvent: platformState.trackAnalyticsEvent,
     requireAuth,
     onOrderCompletedOpenTracker

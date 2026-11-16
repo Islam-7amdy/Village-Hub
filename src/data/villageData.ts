@@ -379,12 +379,20 @@ export interface FarmHarvestItem {
 
 export interface VillageAnnouncement {
   id: string;
+  ownerId: string;
+  authorName: string;
+  authorNameEn?: string;
   villageId: string;
-  title: { ar: string; en: string };
-  category: 'utility' | 'event' | 'community' | 'emergency';
+  title: string;
+  titleEn?: string;
+  content: string;
+  contentEn?: string;
+  category: 'official' | 'utility' | 'community' | 'event' | 'emergency';
   date: string;
-  content: { ar: string; en: string };
-  author: { ar: string; en: string };
+  contactPhone?: string;
+  isPinned?: boolean;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAtMs?: number;
 }
 
 export interface VillageRide {
@@ -876,7 +884,13 @@ export const DEFAULT_SERVICE_SECTIONS: ServiceSectionConfig[] = [
   }
 ];
 
-export type AnalyticsEventType = 'section_view' | 'ad_view' | 'ad_click' | 'provider_view';
+export type AnalyticsEventType =
+  | 'section_view'
+  | 'ad_view'
+  | 'ad_click'
+  | 'news_view'
+  | 'news_click'
+  | 'provider_view';
 
 export interface AnalyticsEventRecord {
   id: string;

@@ -22,11 +22,12 @@ import {
   ServiceSectionConfig,
   UserProfile,
   VillageAd,
+  VillageAnnouncement,
   VillageColorCode,
   VillageConfig,
   getVillageTheme
 } from '../data/villageData';
-import { INITIAL_VILLAGE_ADS } from '../data/demoSeedData';
+import { INITIAL_VILLAGE_ADS, VILLAGE_ANNOUNCEMENTS } from '../data/demoSeedData';
 
 export interface UseVillagePlatformOptions {
   lang: Language;
@@ -55,6 +56,10 @@ export function useVillagePlatform({
   const [firestoreAds, setFirestoreAds] = useState<VillageAd[]>([]);
   const [editedAdsMap, setEditedAdsMap] = useState<Record<string, VillageAd>>({});
   const [deletedAdIds, setDeletedAdIds] = useState<string[]>([]);
+
+  const [firestoreAnnouncements, setFirestoreAnnouncements] = useState<VillageAnnouncement[]>([]);
+  const [editedAnnouncementsMap, setEditedAnnouncementsMap] = useState<Record<string, VillageAnnouncement>>({});
+  const [deletedAnnouncementIds, setDeletedAnnouncementIds] = useState<string[]>([]);
 
   const [firestoreSections, setFirestoreSections] = useState<ServiceSectionConfig[]>([]);
   const [localSectionsOverride, setLocalSectionsOverride] = useState<
@@ -213,6 +218,64 @@ export function useVillagePlatform({
     };
   }, [isAdmin, firebaseUser]);
 
+  // 2b. Important Village News / Announcements Listener
+  useEffect(() => {
+    if (isAdmin) {
+      const unsubAll = onSnapshot(
+        collection(db, 'announcements'),
+        (snap) => {
+          setFirestoreAnnouncements(
+            snap.docs.map((d) => ({ ...(d.data() as VillageAnnouncement), id: d.id }))
+          );
+        },
+        (err) => console.warn('Admin announcements listener warning:', err.message)
+      );
+      return () => unsubAll();
+    }
+
+    let approvedList: VillageAnnouncement[] = [];
+    let ownList: VillageAnnouncement[] = [];
+
+    const syncAnnouncements = () => {
+      const map = new Map<string, VillageAnnouncement>();
+      approvedList.forEach((a) => map.set(a.id, a));
+      ownList.forEach((a) => map.set(a.id, a));
+      setFirestoreAnnouncements(Array.from(map.values()));
+    };
+
+    const unsubApproved = onSnapshot(
+      query(collection(db, 'announcements'), where('status', '==', 'approved')),
+      (snap) => {
+        approvedList = snap.docs.map((d) => ({
+          ...(d.data() as VillageAnnouncement),
+          id: d.id
+        }));
+        syncAnnouncements();
+      },
+      (err) => console.warn('Approved announcements listener warning:', err.message)
+    );
+
+    let unsubOwn: (() => void) | null = null;
+    if (firebaseUser) {
+      unsubOwn = onSnapshot(
+        query(collection(db, 'announcements'), where('ownerId', '==', firebaseUser.uid)),
+        (snap) => {
+          ownList = snap.docs.map((d) => ({
+            ...(d.data() as VillageAnnouncement),
+            id: d.id
+          }));
+          syncAnnouncements();
+        },
+        (err) => console.warn('Own announcements listener warning:', err.message)
+      );
+    }
+
+    return () => {
+      unsubApproved();
+      if (unsubOwn) unsubOwn();
+    };
+  }, [isAdmin, firebaseUser]);
+
   // 3. Service Sections Listener
   useEffect(() => {
     const unsub = onSnapshot(
@@ -300,6 +363,25 @@ export function useVillagePlatform({
     deletedAdIds.forEach((id) => map.delete(id));
     return Array.from(map.values());
   }, [firestoreAds, editedAdsMap, deletedAdIds]);
+
+  const allAnnouncements = useMemo<VillageAnnouncement[]>(() => {
+    const map = new Map<string, VillageAnnouncement>();
+    firestoreAnnouncements.forEach((n) => map.set(n.id, n));
+    if (import.meta.env.DEV) {
+      VILLAGE_ANNOUNCEMENTS.forEach((n) => {
+        if (!map.has(n.id)) map.set(n.id, n);
+      });
+    }
+    Object.values(editedAnnouncementsMap).forEach((n) => map.set(n.id, n));
+    deletedAnnouncementIds.forEach((id) => map.delete(id));
+    return Array.from(map.values()).sort((a, b) => {
+      const pinDiff = (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0);
+      if (pinDiff !== 0) return pinDiff;
+      const msDiff = (b.createdAtMs || 0) - (a.createdAtMs || 0);
+      if (msDiff !== 0) return msDiff;
+      return (b.date || '').localeCompare(a.date || '');
+    });
+  }, [firestoreAnnouncements, editedAnnouncementsMap, deletedAnnouncementIds]);
 
   const trackAnalyticsEvent = useCallback(
     async (eventType: AnalyticsEventType, targetId: string, targetLabel: string) => {
@@ -567,6 +649,111 @@ export function useVillagePlatform({
     [firebaseUser, isAdmin]
   );
 
+  const handleAdminSaveAnnouncement = useCallback(
+    async (
+      announcementId: string,
+      payload: Partial<VillageAnnouncement> & {
+        title: string;
+        content: string;
+        category: VillageAnnouncement['category'];
+      },
+      isNew?: boolean
+    ) => {
+      const existing = allAnnouncements.find((n) => n.id === announcementId);
+      const existsInRemote = firestoreAnnouncements.some((n) => n.id === announcementId);
+      const now = Date.now();
+      const todayIso = new Date().toISOString().split('T')[0];
+
+      const savedAnnouncement: VillageAnnouncement = {
+        id: announcementId,
+        ownerId: existing?.ownerId || firebaseUser?.uid || 'admin',
+        authorName: (payload.authorName ?? existing?.authorName ?? 'إدارة منصة بلدنا')
+          .trim()
+          .slice(0, 80),
+        ...(existing?.authorNameEn || payload.authorNameEn
+          ? { authorNameEn: (payload.authorNameEn ?? existing?.authorNameEn ?? '').trim().slice(0, 80) }
+          : {}),
+        villageId: payload.villageId || existing?.villageId || activeVillage.id,
+        title: payload.title.trim().slice(0, 140),
+        ...(existing?.titleEn || payload.titleEn
+          ? { titleEn: (payload.titleEn ?? existing?.titleEn ?? '').trim().slice(0, 140) }
+          : {}),
+        content: payload.content.trim().slice(0, 800),
+        ...(existing?.contentEn || payload.contentEn
+          ? { contentEn: (payload.contentEn ?? existing?.contentEn ?? '').trim().slice(0, 800) }
+          : {}),
+        category: payload.category,
+        date: (payload.date ?? existing?.date ?? todayIso).trim().slice(0, 30),
+        ...((payload.contactPhone ?? existing?.contactPhone)?.trim()
+          ? {
+              contactPhone: (payload.contactPhone ?? existing?.contactPhone ?? '')
+                .trim()
+                .slice(0, 30)
+            }
+          : {}),
+        isPinned:
+          typeof payload.isPinned === 'boolean'
+            ? payload.isPinned
+            : Boolean(existing?.isPinned),
+        status: payload.status || existing?.status || 'approved',
+        createdAtMs:
+          typeof payload.createdAtMs === 'number'
+            ? payload.createdAtMs
+            : existing?.createdAtMs || now
+      };
+
+      setDeletedAnnouncementIds((prev) => prev.filter((id) => id !== announcementId));
+      setEditedAnnouncementsMap((prev) => ({ ...prev, [announcementId]: savedAnnouncement }));
+      setFirestoreAnnouncements((prev) => {
+        if (prev.some((n) => n.id === announcementId)) {
+          return prev.map((n) => (n.id === announcementId ? savedAnnouncement : n));
+        }
+        return isNew ? [savedAnnouncement, ...prev] : prev;
+      });
+
+      if (firebaseUser && isAdmin) {
+        try {
+          const { id: _ignoreId, ...firestoreFields } = savedAnnouncement;
+          await setDoc(
+            doc(db, 'announcements', announcementId),
+            {
+              ...firestoreFields,
+              ...(!existsInRemote || isNew ? { createdAt: serverTimestamp() } : {}),
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+        } catch (err) {
+          handleFirestoreError(err, OperationType.WRITE, `announcements/${announcementId}`);
+        }
+      }
+    },
+    [allAnnouncements, firestoreAnnouncements, firebaseUser, activeVillage.id, isAdmin]
+  );
+
+  const handleAdminDeleteAnnouncement = useCallback(
+    async (announcementId: string) => {
+      setDeletedAnnouncementIds((prev) =>
+        prev.includes(announcementId) ? prev : [...prev, announcementId]
+      );
+      setEditedAnnouncementsMap((prev) => {
+        const next = { ...prev };
+        delete next[announcementId];
+        return next;
+      });
+      setFirestoreAnnouncements((prev) => prev.filter((n) => n.id !== announcementId));
+
+      if (firebaseUser && isAdmin) {
+        try {
+          await deleteDoc(doc(db, 'announcements', announcementId));
+        } catch (err) {
+          console.warn('Admin delete announcement warning:', err);
+        }
+      }
+    },
+    [firebaseUser, isAdmin]
+  );
+
   const handleCommissionRateChange = useCallback((ratePercent: number) => {
     setAdPricing((prev) => ({ ...prev, commissionRatePercent: ratePercent }));
   }, []);
@@ -580,6 +767,8 @@ export function useVillagePlatform({
     handleCommissionRateChange,
     firestoreAds,
     allAds,
+    firestoreAnnouncements,
+    allAnnouncements,
     mergedSections,
     isSectionEnabled,
     analyticsEvents,
@@ -588,6 +777,8 @@ export function useVillagePlatform({
     handleDeleteSection,
     handleResetSections,
     handleAdminSaveAd,
-    handleAdminDeleteAd
+    handleAdminDeleteAd,
+    handleAdminSaveAnnouncement,
+    handleAdminDeleteAnnouncement
   };
 }

@@ -19,6 +19,7 @@ import {
   ProviderListing,
   ReviewItem,
   VillageAd,
+  VillageAnnouncement,
   VillageConfig,
   VillageColorCode,
   VillageLogoIconId,
@@ -90,7 +91,9 @@ import {
   Hammer,
   Sparkles,
   Power,
-  RefreshCw
+  RefreshCw,
+  Newspaper,
+  Pin
 } from 'lucide-react';
 
 interface AdminWorkspaceProps {
@@ -104,6 +107,7 @@ interface AdminWorkspaceProps {
   adminUids?: string[];
   providers: ProviderListing[];
   ads: VillageAd[];
+  announcements: VillageAnnouncement[];
   users: UserProfile[];
   bannedPhones: BannedPhoneRecord[];
   bookings: BookingRequest[];
@@ -134,6 +138,16 @@ interface AdminWorkspaceProps {
     isNew?: boolean
   ) => Promise<void>;
   onAdminDeleteAd: (adId: string) => Promise<void>;
+  onAdminSaveAnnouncement: (
+    announcementId: string,
+    payload: Partial<VillageAnnouncement> & {
+      title: string;
+      content: string;
+      category: VillageAnnouncement['category'];
+    },
+    isNew?: boolean
+  ) => Promise<void>;
+  onAdminDeleteAnnouncement: (announcementId: string) => Promise<void>;
   onUpdateOrderStatus?: (
     orderId: string,
     status: BookingStatus,
@@ -150,6 +164,7 @@ type AdminSectionTab =
   | 'sections'
   | 'providers'
   | 'ads'
+  | 'news'
   | 'orders'
   | 'settlement'
   | 'users'
@@ -200,6 +215,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
   adminUids,
   providers,
   ads,
+  announcements,
   users,
   bannedPhones,
   bookings,
@@ -221,6 +237,8 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
   onResetSections,
   onAdminSaveAd,
   onAdminDeleteAd,
+  onAdminSaveAnnouncement,
+  onAdminDeleteAnnouncement,
   onUpdateOrderStatus,
   onVerifyInstaPayPayment,
   onAssignOrderProvider,
@@ -264,6 +282,17 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
   const [adPhone, setAdPhone] = useState('');
   const [adDurationDays, setAdDurationDays] = useState('7');
   const [confirmDeleteAdId, setConfirmDeleteAdId] = useState<string | null>(null);
+
+  // Important Village News Editor / Creation State
+  const [editingNewsId, setEditingNewsId] = useState<string | null>(null);
+  const [isNewsFormOpen, setIsNewsFormOpen] = useState(false);
+  const [newsTitle, setNewsTitle] = useState('');
+  const [newsContent, setNewsContent] = useState('');
+  const [newsCategory, setNewsCategory] = useState<VillageAnnouncement['category']>('official');
+  const [newsAuthorName, setNewsAuthorName] = useState('');
+  const [newsPhone, setNewsPhone] = useState('');
+  const [newsPinned, setNewsPinned] = useState(false);
+  const [confirmDeleteNewsId, setConfirmDeleteNewsId] = useState<string | null>(null);
 
   // Pricing & Commission
   const [weekPrice, setWeekPrice] = useState(String(adPricing.adPriceWeekEgp));
@@ -650,6 +679,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
     (p) => p.status === 'approved' && evaluateProviderAvailability(p, nowMs).isOpen
   ).length;
   const pendingAdsCount = ads.filter((a) => a.status === 'pending').length;
+  const pendingNewsCount = announcements.filter((n) => n.status === 'pending').length;
 
   // =========================================================================
   // ACTIONS & HANDLERS
@@ -860,6 +890,78 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
             decision === 'approved'
               ? Date.now() + durationDays * 24 * 60 * 60 * 1000
               : ad.expiresAtMs
+        },
+        false
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleOpenCreateNews = () => {
+    setEditingNewsId(null);
+    setNewsTitle('');
+    setNewsContent('');
+    setNewsCategory('official');
+    setNewsAuthorName(adminProfile?.displayName || (lang === 'ar' ? 'إدارة منصة بلدنا' : 'Platform Admin'));
+    setNewsPhone('');
+    setNewsPinned(false);
+    setIsNewsFormOpen(true);
+  };
+
+  const handleOpenEditNews = (item: VillageAnnouncement) => {
+    setEditingNewsId(item.id);
+    setNewsTitle(item.title);
+    setNewsContent(item.content);
+    setNewsCategory(item.category);
+    setNewsAuthorName(item.authorName);
+    setNewsPhone(item.contactPhone || '');
+    setNewsPinned(Boolean(item.isPinned));
+    setIsNewsFormOpen(true);
+  };
+
+  const handleSubmitNewsForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newsTitle.trim() || !newsContent.trim()) return;
+    const isNew = !editingNewsId;
+    const newsId = editingNewsId || `news-admin-${Date.now()}`;
+
+    setBusyId(`save-news-${newsId}`);
+    try {
+      await onAdminSaveAnnouncement(
+        newsId,
+        {
+          title: newsTitle.trim(),
+          content: newsContent.trim(),
+          category: newsCategory,
+          authorName: newsAuthorName.trim() || (lang === 'ar' ? 'إدارة منصة بلدنا' : 'Platform Admin'),
+          contactPhone: newsPhone.trim(),
+          isPinned: newsPinned,
+          status: 'approved'
+        },
+        isNew
+      );
+      setIsNewsFormOpen(false);
+      setEditingNewsId(null);
+      showToast(lang === 'ar' ? 'تم حفظ ونشر الخبر بنجاح ✓' : 'News item published ✓');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleNewsDecision = async (
+    item: VillageAnnouncement,
+    decision: 'approved' | 'rejected'
+  ) => {
+    setBusyId(item.id);
+    try {
+      await onAdminSaveAnnouncement(
+        item.id,
+        {
+          title: item.title,
+          content: item.content,
+          category: item.category,
+          status: decision
         },
         false
       );
@@ -1225,6 +1327,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
     { id: 'sections', labelAr: 'إدارة الأقسام', labelEn: 'Sections', Icon: LayoutGrid },
     { id: 'providers', labelAr: 'مقدمو الخدمة والتقارير', labelEn: 'Providers & Reports', Icon: Briefcase, badge: pendingProvidersCount },
     { id: 'ads', labelAr: 'التحكم في الإعلانات', labelEn: 'Ads & Telemetry', Icon: Megaphone, badge: pendingAdsCount },
+    { id: 'news', labelAr: 'أهم أخبار البلد', labelEn: 'Village News', Icon: Newspaper, badge: pendingNewsCount },
     { id: 'orders', labelAr: 'الطلبات و InstaPay', labelEn: 'Orders & Dispatch', Icon: PackageCheck, badge: pendingInstaPayVerifications.length },
     { id: 'settlement', labelAr: 'التسويات المالية', labelEn: 'Settlements', Icon: Wallet },
     { id: 'users', labelAr: 'المستخدمون والتصفح', labelEn: 'Users & Activity', Icon: Users },
@@ -2603,6 +2706,306 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* =============================================================== */}
+          {/* TAB 4b: IMPORTANT VILLAGE NEWS & ANNOUNCEMENTS MANAGEMENT       */}
+          {/* =============================================================== */}
+          {activeTab === 'news' && (
+            <div className="no-print space-y-6">
+              <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 font-bold text-sm text-slate-900 dark:text-white">
+                    <Newspaper className="w-4 h-4 text-sky-600" />
+                    <span>
+                      {lang === 'ar' ? 'إدارة أهم أخبار بلدنا والتنبيهات' : 'Important Village News & Notices'}
+                    </span>
+                  </div>
+                  <p className="text-slate-500 dark:text-slate-400">
+                    {lang === 'ar'
+                      ? 'انشر الأخبار العاجلة ومواعيد المرافق والفعاليات أو راجع أخبار الأهالي وثبت المهم منها في الواجهة.'
+                      : 'Publish urgent notices, utility schedules, and community updates, or review resident submissions.'}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenCreateNews}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{lang === 'ar' ? 'نشر خبر هام فوراً' : 'Publish News Now'}</span>
+                </button>
+              </div>
+
+              {isNewsFormOpen && (
+                <form
+                  onSubmit={handleSubmitNewsForm}
+                  className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-sky-300 dark:border-sky-800 space-y-3 text-xs"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      {editingNewsId
+                        ? lang === 'ar'
+                          ? 'تعديل الخبر'
+                          : 'Edit News Item'
+                        : lang === 'ar'
+                        ? 'إضافة خبر جديد لأهم أخبار بلدنا'
+                        : 'Publish Important News'}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsNewsFormOpen(false)}
+                      className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      required
+                      maxLength={140}
+                      value={newsTitle}
+                      onChange={(e) => setNewsTitle(e.target.value)}
+                      placeholder={lang === 'ar' ? 'عنوان الخبر *' : 'Headline *'}
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    />
+                    <select
+                      value={newsCategory}
+                      onChange={(e) =>
+                        setNewsCategory(e.target.value as VillageAnnouncement['category'])
+                      }
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    >
+                      <option value="official">{lang === 'ar' ? 'بيان رسمي' : 'Official Notice'}</option>
+                      <option value="utility">{lang === 'ar' ? 'مرافق ومياه وكهرباء' : 'Utilities'}</option>
+                      <option value="community">{lang === 'ar' ? 'أخبار البلد والأهالي' : 'Community'}</option>
+                      <option value="event">{lang === 'ar' ? 'مناسبات وفعاليات' : 'Events'}</option>
+                      <option value="emergency">{lang === 'ar' ? 'خبر عاجل وهام' : 'Urgent Update'}</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={newsAuthorName}
+                      onChange={(e) => setNewsAuthorName(e.target.value)}
+                      placeholder={lang === 'ar' ? 'المصدر / الكاتب' : 'Source / Author'}
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    />
+                    <input
+                      type="text"
+                      value={newsPhone}
+                      onChange={(e) => setNewsPhone(e.target.value)}
+                      placeholder={lang === 'ar' ? 'رقم تواصل (اختياري)' : 'Contact Phone (Optional)'}
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
+                    />
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    required
+                    maxLength={800}
+                    value={newsContent}
+                    onChange={(e) => setNewsContent(e.target.value)}
+                    placeholder={lang === 'ar' ? 'تفاصيل الخبر كاملة *' : 'Full news details *'}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 resize-none"
+                  />
+
+                  <label className="inline-flex items-center gap-2 font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newsPinned}
+                      onChange={(e) => setNewsPinned(e.target.checked)}
+                      className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                    />
+                    <Pin className="w-3.5 h-3.5 text-amber-600" />
+                    <span>{lang === 'ar' ? 'تثبيت الخبر في الصدارة' : 'Pin headline to top'}</span>
+                  </label>
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsNewsFormOpen(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 font-bold cursor-pointer"
+                    >
+                      {t.cancel}
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold cursor-pointer"
+                    >
+                      {lang === 'ar' ? 'حفظ ونشر الخبر' : 'Save & Publish'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              <div className="space-y-3 text-xs">
+                {announcements.length === 0 ? (
+                  <div className="p-8 text-center rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500">
+                    {lang === 'ar'
+                      ? 'لا توجد أخبار منشورة حتى الآن. اضغط "نشر خبر هام فوراً" للبدء.'
+                      : 'No news items yet. Click "Publish News Now" to add the first update.'}
+                  </div>
+                ) : (
+                  announcements.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-slate-900 dark:text-white">
+                            {item.title}
+                          </span>
+                          <span className="text-slate-400">·</span>
+                          <span
+                            className={`font-bold ${
+                              item.status === 'approved'
+                                ? 'text-emerald-600'
+                                : item.status === 'rejected'
+                                ? 'text-rose-600'
+                                : 'text-amber-600'
+                            }`}
+                          >
+                            {item.status === 'approved'
+                              ? lang === 'ar'
+                                ? 'منشور'
+                                : 'Published'
+                              : item.status === 'rejected'
+                              ? lang === 'ar'
+                                ? 'مرفوض'
+                                : 'Rejected'
+                              : lang === 'ar'
+                              ? 'قيد المراجعة'
+                              : 'Pending'}
+                          </span>
+                          {item.isPinned && (
+                            <>
+                              <span className="text-slate-400">·</span>
+                              <span className="inline-flex items-center gap-1 text-amber-600 font-bold">
+                                <Pin className="w-3 h-3" />
+                                {lang === 'ar' ? 'مثبت' : 'Pinned'}
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                          <span>{item.authorName}</span>
+                          <span>·</span>
+                          <span className="font-mono">{item.date}</span>
+                          {item.contactPhone && (
+                            <>
+                              <span>·</span>
+                              <span className="font-mono">{item.contactPhone}</span>
+                            </>
+                          )}
+                        </div>
+                        <p className="text-slate-600 dark:text-slate-300">{item.content}</p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditNews(item)}
+                          className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'تعديل' : 'Edit'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onAdminSaveAnnouncement(
+                              item.id,
+                              {
+                                title: item.title,
+                                content: item.content,
+                                category: item.category,
+                                isPinned: !item.isPinned
+                              },
+                              false
+                            )
+                          }
+                          className={`px-3 py-1.5 rounded-xl border font-bold flex items-center gap-1 cursor-pointer ${
+                            item.isPinned
+                              ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                              : 'border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <Pin className="w-3.5 h-3.5" />
+                          <span>
+                            {item.isPinned
+                              ? lang === 'ar'
+                                ? 'إلغاء التثبيت'
+                                : 'Unpin'
+                              : lang === 'ar'
+                              ? 'تثبيت'
+                              : 'Pin'}
+                          </span>
+                        </button>
+
+                        {item.status !== 'approved' && (
+                          <button
+                            type="button"
+                            disabled={busyId === item.id}
+                            onClick={() => handleNewsDecision(item, 'approved')}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{lang === 'ar' ? 'نشر' : 'Approve'}</span>
+                          </button>
+                        )}
+
+                        {item.status !== 'rejected' && (
+                          <button
+                            type="button"
+                            disabled={busyId === item.id}
+                            onClick={() => handleNewsDecision(item, 'rejected')}
+                            className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold cursor-pointer"
+                          >
+                            {lang === 'ar' ? 'إيقاف / رفض' : 'Reject'}
+                          </button>
+                        )}
+
+                        {confirmDeleteNewsId === item.id ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await onAdminDeleteAnnouncement(item.id);
+                                setConfirmDeleteNewsId(null);
+                                showToast(lang === 'ar' ? 'تم حذف الخبر' : 'News deleted');
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-rose-600 text-white font-bold cursor-pointer"
+                            >
+                              {lang === 'ar' ? 'تأكيد' : 'Confirm'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteNewsId(null)}
+                              className="px-2 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 cursor-pointer"
+                            >
+                              {t.cancel}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteNewsId(item.id)}
+                            className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}

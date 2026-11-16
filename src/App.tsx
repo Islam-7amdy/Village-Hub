@@ -31,6 +31,7 @@ import { TutoringSection } from './components/ServiceSections/TutoringSection';
 import { CharitySection } from './components/ServiceSections/CharitySection';
 import { OtherServicesSection } from './components/ServiceSections/OtherServicesSection';
 import { AdsSection } from './components/ServiceSections/AdsSection';
+import { NewsSection } from './components/ServiceSections/NewsSection';
 
 import { UniversalBookingModal } from './components/Modals/UniversalBookingModal';
 import { PrescriptionUploadModal } from './components/Modals/PrescriptionUploadModal';
@@ -83,6 +84,7 @@ function AppShell() {
     adPricing,
     handleCommissionRateChange,
     allAds,
+    allAnnouncements,
     mergedSections,
     isSectionEnabled,
     analyticsEvents,
@@ -92,6 +94,8 @@ function AppShell() {
     handleResetSections,
     handleAdminSaveAd,
     handleAdminDeleteAd,
+    handleAdminSaveAnnouncement,
+    handleAdminDeleteAnnouncement,
     mergedProviders,
     approvedProviders,
     isProviderMode,
@@ -393,6 +397,7 @@ function AppShell() {
           adminUids={adminUids}
           providers={mergedProviders}
           ads={allAds}
+          announcements={allAnnouncements}
           users={mergedUsers}
           bannedPhones={mergedBannedPhones}
           bookings={bookings}
@@ -414,6 +419,8 @@ function AppShell() {
           onResetSections={handleResetSections}
           onAdminSaveAd={handleAdminSaveAd}
           onAdminDeleteAd={handleAdminDeleteAd}
+          onAdminSaveAnnouncement={handleAdminSaveAnnouncement}
+          onAdminDeleteAnnouncement={handleAdminDeleteAnnouncement}
           onUpdateOrderStatus={handleUpdateOrderStatus}
           onVerifyInstaPayPayment={handleVerifyInstaPayPayment}
           onAssignOrderProvider={handleAssignOrderProvider}
@@ -629,6 +636,27 @@ function AppShell() {
               isBanned={isCurrentUserBanned}
               adPricing={adPricing}
               nowMs={nowMs}
+              canUseServices={canUsePlatformServices}
+              onRequireLogin={() => openAuthModal('login')}
+              onTrackEvent={trackAnalyticsEvent}
+            />
+          }
+          heroNewsSlot={
+            <NewsSection
+              announcements={allAnnouncements}
+              lang={lang}
+              activeVillageId={activeVillage.id}
+              activeVillageName={activeVillageName}
+              activeVillage={activeVillage}
+              currentUserId={effectiveUid}
+              currentUserName={
+                effectiveProfile?.displayName ||
+                firebaseUser?.displayName ||
+                (lang === 'ar' ? 'أحد أهالي البلد' : 'Village Resident')
+              }
+              defaultPhone={effectiveProfile?.phone || ''}
+              isAdmin={isAdmin}
+              isBanned={isCurrentUserBanned}
               canUseServices={canUsePlatformServices}
               onRequireLogin={() => openAuthModal('login')}
               onTrackEvent={trackAnalyticsEvent}

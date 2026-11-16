@@ -178,6 +178,31 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['ownerId', 'authorName', 'villageId', 'title', 'content', 'category', 'date', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'ownerId', 'authorName', 'authorNameEn', 'villageId', 'title', 'titleEn',
+          'content', 'contentEn', 'category', 'date', 'contactPhone', 'isPinned',
+          'status', 'createdAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.ownerId) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+        (!('authorNameEn' in data) || (data.authorNameEn is string && data.authorNameEn.size() <= 80)) &&
+        isValidId(data.villageId) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 140 &&
+        (!('titleEn' in data) || (data.titleEn is string && data.titleEn.size() <= 140)) &&
+        data.content is string && data.content.size() >= 4 && data.content.size() <= 800 &&
+        (!('contentEn' in data) || (data.contentEn is string && data.contentEn.size() <= 800)) &&
+        data.category in ['official', 'utility', 'community', 'event', 'emergency'] &&
+        data.date is string && data.date.size() >= 4 && data.date.size() <= 30 &&
+        (!('contactPhone' in data) || (data.contactPhone is string && data.contactPhone.size() <= 30)) &&
+        (!('isPinned' in data) || (data.isPinned is bool)) &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        (!('createdAtMs' in data) || (data.createdAtMs is number && data.createdAtMs >= 0)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidBooking(data) {
       return data.keys().hasAll(['ownerId', 'villageId', 'serviceType', 'title', 'providerName', 'customerName', 'customerPhone', 'status', 'createdAt']) &&
         data.keys().hasOnly([
@@ -287,7 +312,7 @@ service cloud.firestore {
         ]) &&
         isValidId(data.ownerId) &&
         (!('userRole' in data) || (data.userRole in ['resident', 'provider', 'admin', 'guest'])) &&
-        data.eventType in ['section_view', 'ad_view', 'ad_click', 'provider_view'] &&
+        data.eventType in ['section_view', 'ad_view', 'ad_click', 'news_view', 'news_click', 'provider_view'] &&
         data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
         (!('targetLabel' in data) || (data.targetLabel is string && data.targetLabel.size() <= 120)) &&
         isValidId(data.villageId) &&
@@ -462,6 +487,50 @@ service cloud.firestore {
           )
         );
       allow delete: if isValidId(adId) && (isAdmin() || isOwner(existing().ownerId));
+    }
+
+    // Important Village News & Announcements (Pending until Admin approves)
+    match /announcements/{announcementId} {
+      allow get: if isValidId(announcementId) && (
+        existing().status == 'approved' ||
+        isOwner(existing().ownerId) ||
+        isAdmin()
+      );
+      allow list: if resource.data.status == 'approved' ||
+        (isSignedIn() && resource.data.ownerId == request.auth.uid) ||
+        isAdmin();
+      allow create: if isValidId(announcementId) &&
+        isSignedIn() &&
+        isVerifiedUser() &&
+        isNotBannedUser() &&
+        isValidAnnouncement(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (incoming().status == 'pending' && incoming().get('isPinned', false) == false)
+        );
+      allow update: if isValidId(announcementId) &&
+        isVerifiedUser() &&
+        isValidAnnouncement(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(existing().ownerId) &&
+            isNotBannedUser() &&
+            existing().status == 'pending' &&
+            incoming().status == existing().status &&
+            incoming().get('isPinned', false) == existing().get('isPinned', false) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'content', 'category', 'contactPhone', 'date', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(announcementId) && (isAdmin() || isOwner(existing().ownerId));
     }
 
     // Bookings & Orders

@@ -25,6 +25,7 @@ import {
   ProviderListing,
   UserProfile,
   VillageAd,
+  VillageAnnouncement,
   VillageConfig,
   evaluateProviderAvailability,
   getServiceStatusLabel,
@@ -52,6 +53,7 @@ export interface UseBookingsOptions {
   mergedProviders: ProviderListing[];
   firestoreAds: VillageAd[];
   allAds: VillageAd[];
+  firestoreAnnouncements?: VillageAnnouncement[];
   trackAnalyticsEvent: (
     eventType: AnalyticsEventType,
     targetId: string,
@@ -78,6 +80,7 @@ export function useBookings({
   mergedProviders,
   firestoreAds,
   allAds,
+  firestoreAnnouncements = [],
   trackAnalyticsEvent,
   requireAuth,
   onOrderCompletedOpenTracker
@@ -279,13 +282,14 @@ export function useBookings({
     () =>
       mergedProviders.filter((p) => p.status === 'pending').length +
       firestoreAds.filter((a) => a.status === 'pending').length +
+      firestoreAnnouncements.filter((n) => n.status === 'pending').length +
       bookings.filter(
         (b) =>
           b.paymentMethod === 'instapay' &&
           b.paymentStatus === 'pending_verification' &&
           b.status !== 'cancelled'
       ).length,
-    [mergedProviders, firestoreAds, bookings]
+    [mergedProviders, firestoreAds, firestoreAnnouncements, bookings]
   );
 
   const userNotifications = useMemo<AppNotificationItem[]>(() => {
@@ -295,6 +299,7 @@ export function useBookings({
     if (isAdmin) {
       const pendingProv = mergedProviders.filter((p) => p.status === 'pending').length;
       const pendingAds = firestoreAds.filter((a) => a.status === 'pending').length;
+      const pendingNews = firestoreAnnouncements.filter((n) => n.status === 'pending').length;
       if (pendingProv > 0) {
         list.push({
           id: `admin-prov-${pendingProv}`,
@@ -321,6 +326,21 @@ export function useBookings({
             lang === 'ar'
               ? 'فيه إعلانات جديدة مستنية موافقتك في لوحة الأدمن.'
               : 'New submitted ads await your approval in the Admin Panel.'
+        });
+      }
+      if (pendingNews > 0) {
+        list.push({
+          id: `admin-news-${pendingNews}`,
+          type: 'admin',
+          tone: 'warning',
+          title:
+            lang === 'ar'
+              ? `أخبار بانتظار المراجعة (${pendingNews})`
+              : `${pendingNews} Pending News Item(s)`,
+          body:
+            lang === 'ar'
+              ? 'فيه أخبار جديدة مرسلة من الأهالي ومستنية اعتمادك للنشر.'
+              : 'Resident news submissions await your approval in the Admin Panel.'
         });
       }
       const pendingInstaPay = bookings.filter(

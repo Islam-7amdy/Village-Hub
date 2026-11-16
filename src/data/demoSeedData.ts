@@ -666,27 +666,39 @@ export const VILLAGE_ANNOUNCEMENTS: VillageAnnouncement[] = IS_DEV
   ? [
       {
         id: 'ann-1',
+        ownerId: 'seed-admin',
+        authorName: 'لجنة ميه القرية',
+        authorNameEn: 'Village Water Committee',
         villageId: 'noqbas',
-        title: { ar: 'مواعيد ضخ ميه الشرب وتنظيف الخزانات الأسبوع ده', en: 'Weekly Water Pumping & Tank Maintenance Schedule' },
+        title: 'مواعيد ضخ ميه الشرب وتنظيف الخزانات الأسبوع ده',
+        titleEn: 'Weekly Water Pumping & Tank Maintenance Schedule',
         category: 'utility',
-        date: '2026-11-13',
-        content: {
-          ar: 'يا جماعة الخير: ميه الناحية الشرقية هتشتغل بقوة من بكرة الجمعة الصبح الساعة 6 لحد السبت بالليل، والناحية الغربية يوم الحد. ياريت الكل يشيك على العوامات.',
-          en: 'Water pumping for the East Quarter starts Friday 6:00 AM through Saturday night; West Quarter follows on Sunday.'
-        },
-        author: { ar: 'لجنة ميه القرية', en: 'Village Water Committee' }
+        date: '2026-11-15',
+        content:
+          'يا جماعة الخير: ميه الناحية الشرقية هتشتغل بقوة من بكرة الجمعة الصبح الساعة 6 لحد السبت بالليل، والناحية الغربية يوم الحد. ياريت الكل يشيك على العوامات.',
+        contentEn:
+          'Water pumping for the East Quarter starts Friday 6:00 AM through Saturday night; West Quarter follows on Sunday.',
+        isPinned: true,
+        status: 'approved',
+        createdAtMs: 1763200000000
       },
       {
         id: 'ann-2',
+        ownerId: 'seed-admin',
+        authorName: 'شباب الخير بالبلد',
+        authorNameEn: 'Village Youth Group',
         villageId: 'noqbas',
-        title: { ar: 'يوم نضافة وتشجير حوالين المدرسة الابتدائية السبت الجاي', en: 'Community Clean-Up & Tree Planting Saturday' },
+        title: 'يوم نضافة وتشجير حوالين المدرسة الابتدائية السبت الجاي',
+        titleEn: 'Community Clean-Up & Tree Planting Saturday',
         category: 'community',
-        date: '2026-11-11',
-        content: {
-          ar: 'شباب القرية متجمعين يوم السبت الساعة 9 الصبح قدام المدرسة الابتدائية عشان نزرع شجر زيتون وظل وننضف الرصيف. اللي يقدر يشرفنا أهلاً بيه.',
-          en: 'Village youth are gathering Saturday at 9:00 AM by the elementary school to plant shade trees and tidy the street.'
-        },
-        author: { ar: 'شباب الخير بالبلد', en: 'Village Youth Group' }
+        date: '2026-11-13',
+        content:
+          'شباب القرية متجمعين يوم السبت الساعة 9 الصبح قدام المدرسة الابتدائية عشان نزرع شجر زيتون وظل وننضف الرصيف. اللي يقدر يشرفنا أهلاً بيه.',
+        contentEn:
+          'Village youth are gathering Saturday at 9:00 AM by the elementary school to plant shade trees and tidy the street.',
+        isPinned: false,
+        status: 'approved',
+        createdAtMs: 1763050000000
       }
     ]
   : [];

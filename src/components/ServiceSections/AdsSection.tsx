@@ -227,13 +227,13 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
 
   return (
     <div
-      className="rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs"
+      className="h-full flex flex-col rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
       {/* Hero Showcase Band: Featured Ads & Offers */}
-      <div className="relative bg-slate-900 text-white">
-        <div className={`bg-gradient-to-br ${theme.heroTint} p-5 sm:p-8`}>
+      <div className="relative flex-1 bg-slate-900 text-white flex flex-col">
+        <div className={`flex-1 bg-gradient-to-br ${theme.heroTint} p-5 sm:p-8 flex flex-col justify-between`}>
           {/* Showcase Header Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 pb-5 border-b border-white/15">
             <div className="flex items-center gap-3 min-w-0">
@@ -272,7 +272,7 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
           </div>
 
           {/* Spotlight Featured Offer Card */}
-          <div className="pt-5 min-h-[168px] flex flex-col justify-between gap-5">
+          <div className="pt-5 min-h-[168px] flex-1 flex flex-col justify-between gap-5">
             {featuredAd ? (
               <>
                 <div className="space-y-2.5 max-w-3xl">
@@ -292,7 +292,7 @@ export const AdsSection: React.FC<AdsSectionProps> = ({
                     )}
                   </div>
 
-                  <h2 className="text-xl sm:text-3xl font-extrabold tracking-tight leading-tight text-balance text-white">
+                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight leading-tight text-balance text-white">
                     {featuredAd.title}
                   </h2>
 
